@@ -12,6 +12,7 @@ import { Diretorio } from './pages/Diretorio';
 import { Equipamentos } from './pages/Equipamentos';
 import { Mural } from './pages/Mural';
 import { AdminPanel } from './pages/AdminPanel';
+import { TrocaProteinas } from './pages/TrocaProteinas';
 import './index.css';
 
 function App() {
@@ -43,6 +44,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Cardapio />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/troca-proteina"
+                element={
+                  <ProtectedRoute>
+                    <TrocaProteinas />
                   </ProtectedRoute>
                 }
               />

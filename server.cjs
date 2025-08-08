@@ -11,6 +11,8 @@ const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
+const { format, parseISO } = require('date-fns');
+const { ptBR } = require('date-fns/locale');
 
 const app = express();
 const PORT = process.env.PORT || 5173; // backend em 3000 (Vite fica em 5173)
@@ -32,6 +34,14 @@ const db = new sqlite3.Database(dbPath, (err) => {
   if (err) console.error('Erro ao abrir o banco:', err.message);
   else console.log('Banco conectado:', dbPath);
 });
+
+// IDs dos calendários do Google para cada sala
+const roomCalendars = {
+  aquario: 'sala.aquario@group.calendar.google.com',
+  grande: 'sala.grande@group.calendar.google.com',
+  pequena: 'sala.pequena@group.calendar.google.com',
+  recepcao: 'sala.recepcao@group.calendar.google.com',
+};
 
 // Helpers Promises
 const run = (sql, params = []) =>
@@ -88,11 +98,12 @@ function createSchema() {
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS trocas_proteina (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      data_ref DATE NOT NULL,
+      data DATE NOT NULL,
+      dia TEXT NOT NULL,
       proteina_original TEXT NOT NULL,
       proteina_nova TEXT NOT NULL,
-      usuario_email TEXT NOT NULL,
-      usuario_nome TEXT NOT NULL,
+      email TEXT NOT NULL,
+      nome TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     db.run(`CREATE TABLE IF NOT EXISTS mural_comentarios (
@@ -244,14 +255,58 @@ async function registrarPontos({ email, nome, acao, pontos, refTable = null, ref
 app.post('/api/reservas-salas', async (req, res) => {
   try {
     const { sala, title, start, end } = req.body;
-    if (!sala || !title || !start || !end) return res.status(400).json({ ok: false, error: 'Campos: sala, title, start, end' });
+    if (!sala || !title || !start || !end)
+      return res.status(400).json({ ok: false, error: 'Campos: sala, title, start, end' });
+
+    const conflict = await get(
+      `SELECT 1 FROM reservas_salas WHERE sala=? AND NOT (? >= end OR ? <= start)`,
+      [sala, start, end]
+    );
+    if (conflict)
+      return res.status(409).json({ ok: false, error: 'Sala já reservada neste horário' });
+
     const info = await run(
       `INSERT INTO reservas_salas (sala, title, start, end, created_by_email, created_by_name)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [sala, title, start, end, req.user.email, req.user.name]
     );
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'reserva_sala', pontos: 10, refTable: 'reservas_salas', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
+
+    let googleId = null;
+    const gToken = req.headers['x-gapi-token'];
+    if (gToken) {
+      try {
+        const calId = roomCalendars[sala] || 'primary';
+        const gRes = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calId}/events`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${gToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            summary: title,
+            start: { dateTime: start },
+            end: { dateTime: end },
+          }),
+        });
+        if (gRes.ok) {
+          const gJson = await gRes.json();
+          googleId = gJson.id;
+          await run(`UPDATE reservas_salas SET google_event_id=? WHERE id=?`, [googleId, info.lastID]);
+        }
+      } catch (err) {
+        console.error('Erro Google Calendar:', err);
+      }
+    }
+
+    await registrarPontos({
+      email: req.user.email,
+      nome: req.user.name,
+      acao: 'reserva_sala',
+      pontos: 10,
+      refTable: 'reservas_salas',
+      refId: info.lastID,
+    });
+    res.json({ ok: true, id: info.lastID, google_event_id: googleId });
   } catch (e) {
     console.error('POST /api/reservas-salas', e);
     res.status(500).json({ ok: false, error: 'Erro ao salvar reserva' });
@@ -261,7 +316,7 @@ app.post('/api/reservas-salas', async (req, res) => {
 app.get('/api/reservas-salas', async (_req, res) => {
   try {
     const rows = await all(
-      `SELECT id, sala, title, start, end, created_by_name, created_by_email, created_at
+      `SELECT id, sala, title, start, end, created_by_name, created_by_email, google_event_id, created_at
        FROM reservas_salas ORDER BY start ASC`
     );
     res.json(rows);
@@ -274,15 +329,49 @@ app.put('/api/reservas-salas/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { sala, title, start, end } = req.body;
-    const info = await run(
-      `UPDATE reservas_salas SET
-         sala=COALESCE(?, sala),
-         title=COALESCE(?, title),
-         start=COALESCE(?, start),
-         end=COALESCE(?, end)
-       WHERE id=?`,
-      [sala ?? null, title ?? null, start ?? null, end ?? null, id]
+    const row = await get(`SELECT * FROM reservas_salas WHERE id=?`, [id]);
+    if (!row) return res.status(404).json({ ok: false, error: 'Reserva não encontrada' });
+    if (row.created_by_email !== req.user.email)
+      return res.status(403).json({ ok: false, error: 'Sem permissão' });
+
+    const newSala = sala || row.sala;
+    const newStart = start || row.start;
+    const newEnd = end || row.end;
+    const newTitle = title || row.title;
+
+    const conflict = await get(
+      `SELECT 1 FROM reservas_salas WHERE sala=? AND id<>? AND NOT (? >= end OR ? <= start)`,
+      [newSala, id, newStart, newEnd]
     );
+    if (conflict)
+      return res.status(409).json({ ok: false, error: 'Sala já reservada neste horário' });
+
+    const info = await run(
+      `UPDATE reservas_salas SET sala=?, title=?, start=?, end=? WHERE id=?`,
+      [newSala, newTitle, newStart, newEnd, id]
+    );
+
+    const gToken = req.headers['x-gapi-token'];
+    if (gToken && row.google_event_id) {
+      try {
+        const calId = roomCalendars[newSala] || 'primary';
+        await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${row.google_event_id}`, {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${gToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            summary: newTitle,
+            start: { dateTime: newStart },
+            end: { dateTime: newEnd },
+          }),
+        });
+      } catch (err) {
+        console.error('Erro Google Calendar:', err);
+      }
+    }
+
     res.json({ ok: true, changes: info.changes });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -291,7 +380,26 @@ app.put('/api/reservas-salas/:id', async (req, res) => {
 
 app.delete('/api/reservas-salas/:id', async (req, res) => {
   try {
+    const row = await get(`SELECT sala, created_by_email, google_event_id FROM reservas_salas WHERE id=?`, [req.params.id]);
+    if (!row) return res.status(404).json({ ok: false, error: 'Reserva não encontrada' });
+    if (row.created_by_email !== req.user.email)
+      return res.status(403).json({ ok: false, error: 'Sem permissão' });
+
     const info = await run(`DELETE FROM reservas_salas WHERE id=?`, [req.params.id]);
+
+    const gToken = req.headers['x-gapi-token'];
+    if (gToken && row.google_event_id) {
+      try {
+        const calId = roomCalendars[row.sala] || 'primary';
+        await fetch(`https://www.googleapis.com/calendar/v3/calendars/${calId}/events/${row.google_event_id}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${gToken}` },
+        });
+      } catch (err) {
+        console.error('Erro Google Calendar:', err);
+      }
+    }
+
     res.json({ ok: true, changes: info.changes });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
@@ -336,14 +444,22 @@ app.get('/api/agendamentos-portaria', async (_req, res) => {
 // -------------------------------------------------------------
 app.post('/api/trocas-proteina', async (req, res) => {
   try {
-    const { data_ref, proteina_original, proteina_nova } = req.body;
-    if (!data_ref || !proteina_original || !proteina_nova) {
-      return res.status(400).json({ ok: false, error: 'Campos: data_ref, proteina_original, proteina_nova' });
+    const { data, proteina_original, proteina_nova } = req.body;
+    if (!data || !proteina_original || !proteina_nova) {
+      return res.status(400).json({ ok: false, error: 'Campos: data, proteina_original, proteina_nova' });
     }
+    const exists = await get(
+      `SELECT id FROM trocas_proteina WHERE email = ? AND date(data) = date(?)`,
+      [req.user.email, data]
+    );
+    if (exists) {
+      return res.status(400).json({ ok: false, error: 'Troca já registrada para esta data' });
+    }
+    const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
     const info = await run(
-      `INSERT INTO trocas_proteina (data_ref, proteina_original, proteina_nova, usuario_email, usuario_nome)
-       VALUES (?, ?, ?, ?, ?)`,
-      [data_ref, proteina_original, proteina_nova, req.user.email, req.user.name]
+      `INSERT INTO trocas_proteina (data, dia, proteina_original, proteina_nova, email, nome)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [data, dia, proteina_original, proteina_nova, req.user.email, req.user.name]
     );
     await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'troca_proteina', pontos: 5, refTable: 'trocas_proteina', refId: info.lastID });
     res.json({ ok: true, id: info.lastID });
@@ -356,13 +472,13 @@ app.post('/api/trocas-proteina', async (req, res) => {
 app.get('/api/trocas-proteina', async (req, res) => {
   try {
     const { from, to } = req.query;
-    let sql = `SELECT * FROM trocas_proteina`;
-    const params = [];
+    let sql = `SELECT * FROM trocas_proteina WHERE email = ?`;
+    const params = [req.user.email];
     if (from && to) {
-      sql += ` WHERE date(data_ref) BETWEEN date(?) AND date(?)`;
+      sql += ` AND date(data) BETWEEN date(?) AND date(?)`;
       params.push(from, to);
     }
-    sql += ` ORDER BY date(data_ref) ASC, usuario_nome ASC`;
+    sql += ` ORDER BY date(data) ASC`;
     const rows = await all(sql, params);
     res.json(rows);
   } catch (e) {
@@ -370,44 +486,103 @@ app.get('/api/trocas-proteina', async (req, res) => {
   }
 });
 
-app.get('/api/trocas-proteina/exportar', async (req, res) => {
+app.get('/admin/exportar-trocas', async (req, res) => {
   try {
-    const { formato = 'xlsx', from, to } = req.query;
-    let sql = `SELECT * FROM trocas_proteina`;
+    if (!['TI', 'RH'].includes(req.user.sector)) {
+      return res.status(403).json({ ok: false, error: 'Sem permissão' });
+    }
+
+    const { formato = 'xlsx', from, to, q } = req.query;
+    let sql =
+      `SELECT nome, email, data, proteina_original, proteina_nova, created_at FROM trocas_proteina`;
     const params = [];
+    const conds = [];
+
     if (from && to) {
-      sql += ` WHERE date(data_ref) BETWEEN date(?) AND date(?)`;
+      conds.push(`date(data) BETWEEN date(?) AND date(?)`);
       params.push(from, to);
     }
-    sql += ` ORDER BY date(data_ref) ASC, usuario_nome ASC`;
+    if (q) {
+      conds.push(`(LOWER(nome) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?))`);
+      params.push(`%${q}%`, `%${q}%`);
+    }
+    if (conds.length) sql += ` WHERE ` + conds.join(' AND ');
+    sql += ` ORDER BY date(data) ASC, nome ASC`;
     const rows = await all(sql, params);
 
-    if (String(formato).toLowerCase() === 'xlsx') {
-      const wb = new ExcelJS.Workbook();
-      const ws = wb.addWorksheet('Trocas de Proteína');
-      ws.addRow(['Data', 'Usuário', 'E-mail', 'Original', 'Nova', 'Criado em']);
-      rows.forEach(r => ws.addRow([r.data_ref, r.usuario_nome, r.usuario_email, r.proteina_original, r.proteina_nova, r.created_at]));
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="trocas_proteina.xlsx"`);
-      await wb.xlsx.write(res);
-      return res.end();
-    }
+    const cols = [
+      'Nome do usuário',
+      'E-mail',
+      'Dia da troca',
+      'Proteína original',
+      'Nova proteína',
+      'Data da solicitação',
+    ];
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="trocas_proteina.pdf"`);
-    const doc = new PDFDocument({ margin: 36 });
-    doc.pipe(res);
-    doc.fontSize(16).text('Relatório - Trocas de Proteína', { align: 'center' });
-    doc.moveDown();
-    rows.forEach(r => {
-      doc.fontSize(11).text(
-        `Data: ${r.data_ref} | ${r.usuario_nome} <${r.usuario_email}> | ${r.proteina_original} -> ${r.proteina_nova} | Criado: ${r.created_at}`
-      );
-      doc.moveDown(0.2);
-    });
-    doc.end();
+    switch (String(formato).toLowerCase()) {
+      case 'csv': {
+        let csv = cols.join(';') + '\n';
+        rows.forEach(r => {
+          csv +=
+            [
+              r.nome,
+              r.email,
+              r.data,
+              r.proteina_original,
+              r.proteina_nova,
+              r.created_at,
+            ].join(';') + '\n';
+        });
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename="trocas_proteina.csv"`);
+        return res.send(csv);
+      }
+      case 'pdf': {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="trocas_proteina.pdf"`);
+        const doc = new PDFDocument({ margin: 36 });
+        doc.pipe(res);
+        doc.fontSize(16).text('Relatório - Trocas de Proteína', { align: 'center' });
+        doc.moveDown();
+        rows.forEach(r => {
+          doc
+            .fontSize(11)
+            .text(
+              `${r.nome} <${r.email}> | Dia: ${r.data} | ${r.proteina_original} -> ${r.proteina_nova} | Solicitação: ${r.created_at}`
+            );
+          doc.moveDown(0.2);
+        });
+        doc.end();
+        return;
+      }
+      default: {
+        const wb = new ExcelJS.Workbook();
+        const ws = wb.addWorksheet('Trocas de Proteína');
+        ws.addRow(cols);
+        rows.forEach(r =>
+          ws.addRow([
+            r.nome,
+            r.email,
+            r.data,
+            r.proteina_original,
+            r.proteina_nova,
+            r.created_at,
+          ])
+        );
+        res.setHeader(
+          'Content-Type',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        );
+        res.setHeader(
+          'Content-Disposition',
+          `attachment; filename="trocas_proteina.xlsx"`
+        );
+        await wb.xlsx.write(res);
+        return res.end();
+      }
+    }
   } catch (e) {
-    console.error('GET /api/trocas-proteina/exportar', e);
+    console.error('GET /admin/exportar-trocas', e);
     res.status(500).json({ ok: false, error: 'Erro ao gerar arquivo' });
   }
 });

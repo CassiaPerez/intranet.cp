@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import { ChefHat, Wheat, Milk, Egg, Fish, Leaf, Download } from 'lucide-react';
+import { ChefHat, Wheat, Milk, Egg, Fish, Leaf, CheckCircle } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
-import { useGamification } from '../contexts/GamificationContext';
 
 interface MenuItem {
   id: string;
@@ -19,22 +18,15 @@ interface MenuItem {
   alergenos?: string[];
 }
 
-interface ProteinExchange {
-  dia: number;
-  proteinaOriginal: string;
-  proteinaNova: string;
-  usuario: string;
-  data: Date;
-}
-
 export const Cardapio: React.FC = () => {
-  const { user } = useAuth();
-  const { addActivity } = useGamification();
-  const [activeTab, setActiveTab] = useState<'padrao' | 'light' | 'trocas'>('padrao');
+  const { user, isAdmin } = useAuth();
+  const tokenHeader = user ? `Bearer ${btoa(JSON.stringify(user))}` : '';
+  const [activeTab, setActiveTab] = useState<'padrao' | 'light'>('padrao');
   const [cardapioPadrao, setCardapioPadrao] = useState<MenuItem[]>([]);
   const [cardapioLight, setCardapioLight] = useState<MenuItem[]>([]);
-  const [trocasProteina, setTrocasProteina] = useState<{ [key: string]: string }>({});
-  const [proteinExchanges, setProteinExchanges] = useState<ProteinExchange[]>([]);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [q, setQ] = useState('');
 
   const currentMonth = new Date();
   const diasUteis = eachDayOfInterval({
@@ -45,12 +37,7 @@ export const Cardapio: React.FC = () => {
     return day !== 0 && day !== 6;
   });
 
-  const proteinas = [
-    'Frango Grelhado', 'Carne Bovina', 'Peixe Assado', 'Porco Assado',
-    'Vegetariano', 'Frango Empanado', 'Hambúrguer', 'Salmão'
-  ];
-
-  const alergenos = {
+  const alergenos: Record<string, { icon: React.ComponentType<{ className?: string; title?: string }>; name: string; color: string }> = {
     gluten: { icon: Wheat, name: 'Glúten', color: 'text-yellow-600' },
     lactose: { icon: Milk, name: 'Lactose', color: 'text-blue-600' },
     ovo: { icon: Egg, name: 'Ovo', color: 'text-orange-600' },
@@ -58,14 +45,19 @@ export const Cardapio: React.FC = () => {
     vegetariano: { icon: Leaf, name: 'Vegetariano', color: 'text-green-600' },
   };
 
+  const monthSlug = format(currentMonth, 'MMMM', { locale: ptBR })
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '');
+
   useEffect(() => {
     const fetchCardapio = async () => {
       try {
-        const resPadrao = await fetch('/cardapio/cardapio-agosto-padrao.json');
+        const resPadrao = await fetch(`/cardapio/cardapio-${monthSlug}-padrao.json`);
         const jsonPadrao = await resPadrao.json();
         setCardapioPadrao(jsonPadrao || []);
 
-        const resLight = await fetch('/cardapio/cardapio-agosto-light.json');
+        const resLight = await fetch(`/cardapio/cardapio-${monthSlug}-light.json`);
         const jsonLight = await resLight.json();
         setCardapioLight(jsonLight || []);
       } catch (err) {
@@ -75,47 +67,31 @@ export const Cardapio: React.FC = () => {
     };
 
     fetchCardapio();
-  }, []);
+  }, [monthSlug]);
 
-  const getCardapioAtual = () => activeTab === 'light' ? cardapioLight : cardapioPadrao;
+  const getCardapioAtual = () => (activeTab === 'light' ? cardapioLight : cardapioPadrao);
 
-  const handleProteinChange = (data: string, novaProteina: string) => {
-    setTrocasProteina(prev => ({ ...prev, [data]: novaProteina }));
-  };
-
-  const submitAllExchanges = () => {
-    if (Object.keys(trocasProteina).length === 0) {
-      toast.error('Nenhuma troca selecionada!');
-      return;
+  const handleExport = async (formato: string) => {
+    try {
+      const params = new URLSearchParams({ formato });
+      if (from) params.append('from', from);
+      if (to) params.append('to', to);
+      if (q) params.append('q', q);
+      const res = await fetch(`/admin/exportar-trocas?${params.toString()}`, {
+        headers: { Authorization: tokenHeader },
+      });
+      if (!res.ok) throw new Error('erro');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `trocas_proteina.${formato}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+      toast.success('Exportação gerada.');
+    } catch {
+      toast.error('Erro ao exportar.');
     }
-
-    const novasTrocas: ProteinExchange[] = Object.entries(trocasProteina).map(([data, nova]) => {
-      const item = cardapioPadrao.find(c => c.data === data);
-      return {
-        dia: parseInt(data.split('/')[0]),
-        proteinaOriginal: item?.proteina || '',
-        proteinaNova: nova,
-        usuario: user?.name || 'Usuário Atual',
-        data: new Date(),
-      };
-    });
-
-    setProteinExchanges(prev => [...prev, ...novasTrocas]);
-    setTrocasProteina({});
-
-    novasTrocas.forEach(troca => {
-      addActivity('protein_exchange', `Trocou proteína do dia ${troca.dia}`, troca);
-    });
-
-    toast.success(`${novasTrocas.length} trocas enviadas com sucesso!`);
-  };
-
-  const exportExchanges = (formato: 'excel' | 'pdf' | 'csv') => {
-    if (user?.sector !== 'RH') {
-      toast.error('Apenas usuários do RH podem exportar.');
-      return;
-    }
-    toast.success(`Exportado como ${formato.toUpperCase()}`);
   };
 
   return (
@@ -131,17 +107,54 @@ export const Cardapio: React.FC = () => {
           </div>
         </div>
 
+        {isAdmin && (
+          <div className="space-y-2 mt-4">
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="date"
+                value={from}
+                onChange={e => setFrom(e.target.value)}
+                className="border rounded px-2 py-1 text-sm"
+              />
+              <input
+                type="date"
+                value={to}
+                onChange={e => setTo(e.target.value)}
+                className="border rounded px-2 py-1 text-sm"
+              />
+              <input
+                type="text"
+                placeholder="Nome ou e-mail"
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                className="border rounded px-2 py-1 text-sm"
+              />
+            </div>
+            <div className="flex gap-2">
+              {['xlsx', 'csv', 'pdf'].map(fmt => (
+                <button
+                  key={fmt}
+                  onClick={() => handleExport(fmt)}
+                  className="px-3 py-1 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+                >
+                  {fmt.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
-          {['padrao', 'light', 'trocas'].map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-6 py-2 rounded-lg font-medium transition-colors ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              {tab === 'padrao' ? 'Cardápio Padrão' : tab === 'light' ? 'Cardápio Light' : 'Troca de Proteínas'}
-            </button>
-          ))}
-        </div>
+            {['padrao', 'light'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab as 'padrao' | 'light')}
+                className={`px-6 py-2 rounded-lg font-medium transition-colors ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
+              >
+                {tab === 'padrao' ? 'Cardápio Padrão' : 'Cardápio Light'}
+              </button>
+            ))}
+          </div>
 
         {(activeTab === 'padrao' || activeTab === 'light') && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -155,19 +168,37 @@ export const Cardapio: React.FC = () => {
                 </div>
               );
 
-              return (
-                <div key={item.data} className="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4">
-                  <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-semibold w-fit mb-2">{item.data}</div>
-                  <h3 className="font-semibold text-gray-900">{item.prato}</h3>
-                  <p className="text-sm text-gray-700"><strong>Proteína:</strong> {item.proteina}</p>
-                  <p className="text-sm text-gray-700"><strong>Acompanhamentos:</strong> {item.acompanhamentos?.join(', ') || '---'}</p>
-                  <p className="text-sm text-gray-700"><strong>Sobremesa:</strong> {item.sobremesa}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                return (
+                  <div key={item.data} className="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4">
+                    <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-semibold w-fit mb-2">{item.data}</div>
+                    <h3 className="font-semibold text-gray-900">{item.prato}</h3>
+                    <p className="text-sm text-gray-700"><strong>Proteína:</strong> {item.proteina}</p>
+                    <ul className="text-sm text-gray-700 mt-1 space-y-1">
+                      {item.acompanhamentos?.map(acc => (
+                        <li key={acc} className="flex items-center">
+                          <CheckCircle className="w-4 h-4 text-green-500 mr-1" />
+                          {acc}
+                        </li>
+                      )) || <li className="italic">--</li>}
+                    </ul>
+                    <p className="text-sm text-gray-700 mt-1"><strong>Sobremesa:</strong> {item.sobremesa}</p>
+                    {item.alergenos && (
+                      <div className="flex space-x-1 mt-2">
+                        {item.alergenos.map(al => {
+                        const info = alergenos[al];
+                        const AIcon = info?.icon;
+                        return AIcon ? (
+                          <AIcon key={al} className={`w-4 h-4 ${info.color}`} title={info.name} />
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
     </Layout>
   );
 };
