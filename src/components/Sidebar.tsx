@@ -1,11 +1,12 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
-  Home, 
-  Calendar, 
-  UtensilsCrossed, 
-  Users, 
-  Monitor, 
+  Home,
+  Calendar,
+  UtensilsCrossed,
+  Drumstick,
+  Users,
+  Monitor,
   MessageSquare,
   Settings,
   Star,
@@ -22,6 +23,7 @@ export const Sidebar: React.FC = () => {
     { icon: Home, label: 'Home', path: '/' },
     { icon: Calendar, label: 'Reservas', path: '/reservas' },
     { icon: UtensilsCrossed, label: 'Cardápio', path: '/cardapio' },
+    { icon: Drumstick, label: 'Troca de Proteína', path: '/troca-proteina' },
     { icon: Users, label: 'Diretório', path: '/diretorio' },
     { icon: Monitor, label: 'Equipamentos', path: '/equipamentos' },
     { icon: MessageSquare, label: 'Mural', path: '/mural' },
