@@ -117,13 +117,10 @@ export const Mural: React.FC = () => {
   };
 
   const handleReaction = (postId: string, reactionType: 'like' | 'love') => {
-    const post = posts.find(p => p.id === postId);
-    const existingReaction = post?.reactions.find(r => r.userId === user?.id);
-    
-    setPosts(prev => prev.map(post => {
-      if (post.id === postId) {
-        const existingReactionIndex = post.reactions.findIndex(r => r.userId === user?.id);
-        const newReactions = [...post.reactions];
+    setPosts(prev => prev.map(p => {
+      if (p.id === postId) {
+        const existingReactionIndex = p.reactions.findIndex(r => r.userId === user?.id);
+        const newReactions = [...p.reactions];
         
         if (existingReactionIndex >= 0) {
           if (newReactions[existingReactionIndex].type === reactionType) {
@@ -133,9 +130,9 @@ export const Mural: React.FC = () => {
             // Update reaction type
             newReactions[existingReactionIndex].type = reactionType;
             // Add gamification activity for reaction change
-            addActivity('reaction', `Reagiu ${reactionType === 'like' ? '👍' : '❤️'} à publicação: ${post.title}`, {
+            addActivity('reaction', `Reagiu ${reactionType === 'like' ? '👍' : '❤️'} à publicação: ${p.title}`, {
               postId,
-              postTitle: post.title,
+              postTitle: p.title,
               reactionType,
             });
           }
@@ -147,16 +144,16 @@ export const Mural: React.FC = () => {
             userName: user?.name || 'Usuário',
           });
           // Add gamification activity for new reaction
-          addActivity('reaction', `Reagiu ${reactionType === 'like' ? '👍' : '❤️'} à publicação: ${post.title}`, {
+          addActivity('reaction', `Reagiu ${reactionType === 'like' ? '👍' : '❤️'} à publicação: ${p.title}`, {
             postId,
-            postTitle: post.title,
+            postTitle: p.title,
             reactionType,
           });
         }
-        
-        return { ...post, reactions: newReactions };
+
+        return { ...p, reactions: newReactions };
       }
-      return post;
+      return p;
     }));
   };
 
@@ -164,7 +161,6 @@ export const Mural: React.FC = () => {
     const commentText = commentTexts[postId];
     if (!commentText?.trim()) return;
 
-    const post = posts.find(p => p.id === postId);
     const newComment: Comment = {
       id: Date.now().toString(),
       text: commentText,

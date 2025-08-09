@@ -127,7 +127,7 @@ export const Equipamentos: React.FC = () => {
         justification: '',
         priority: 'medium',
       });
-    } catch (error) {
+    } catch {
       toast.error('Erro ao enviar solicitação!');
     } finally {
       setLoading(false);

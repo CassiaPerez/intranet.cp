@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Routes, Route, NavLink } from 'react-router-dom';
 import { Layout } from '../components/Layout';
-import { Settings, Monitor, Users, UserPlus, UserMinus, Edit, UtensilsCrossed, Download } from 'lucide-react';
+import { Settings, Monitor, Users, UserPlus, Edit, UtensilsCrossed, Download } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
   return (
@@ -230,7 +230,7 @@ const HRPanel: React.FC = () => {
 
 const UserManagement: React.FC = () => {
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -258,6 +258,20 @@ const UserManagement: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {showAddUserModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-lg space-y-4">
+            <h4 className="text-lg font-semibold text-gray-900">Adicionar Usuário</h4>
+            <button
+              onClick={() => setShowAddUserModal(false)}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

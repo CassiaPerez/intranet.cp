@@ -26,7 +26,7 @@ export const LoginPage: React.FC = () => {
       } else {
         toast.error('Credenciais inválidas!');
       }
-    } catch (error) {
+    } catch {
       toast.error('Erro ao fazer login!');
     } finally {
       setLoading(false);
@@ -42,7 +42,7 @@ export const LoginPage: React.FC = () => {
       } else {
         toast.error('Erro ao fazer login com Google!');
       }
-    } catch (error) {
+    } catch {
       toast.error('Erro ao fazer login com Google!');
     } finally {
       setLoading(false);

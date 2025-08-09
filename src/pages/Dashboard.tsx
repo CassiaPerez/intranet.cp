@@ -127,7 +127,7 @@ export const Dashboard: React.FC = () => {
               <span className="text-sm text-gray-500">{getTotalActivities()} atividades totais</span>
             </div>
             <div className="space-y-4">
-              {(userStats?.activities.slice(0, 5) || recentActivities).map((activity, index) => (
+              {(userStats?.activities.slice(0, 5) || recentActivities).map((activity) => (
                 <div key={activity.id} className="flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="bg-blue-100 rounded-lg p-2">
                     {(() => {
