@@ -8,7 +8,6 @@ import {
 import {
   Home,
   CalendarDays,
-  DoorOpen,
   Utensils,
   Repeat2,
   Users2,
@@ -25,18 +24,21 @@ type MenuItem = {
   to: string;
   icon: React.ElementType;
   section?: string;
-  adminOnly?: boolean; // só TI/RH
+  adminOnly?: boolean;
 };
 
 const baseItems: MenuItem[] = [
   { label: "Início", to: "/", icon: Home, section: "Principal" },
+
   { label: "Reservas de Salas", to: "/reservas", icon: CalendarDays, section: "Reservas" },
-  { label: "Agendamentos Portaria", to: "/portaria", icon: DoorOpen, section: "Reservas" },
+
   { label: "Cardápio do Mês", to: "/cardapio", icon: Utensils, section: "Refeitório" },
-  { label: "Troca de Proteínas", to: "/trocas-proteina", icon: Repeat2, section: "Refeitório" },
+  { label: "Troca de Proteínas", to: "/troca-proteina", icon: Repeat2, section: "Refeitório" },
+
   { label: "Mural de Informações", to: "/mural", icon: Megaphone, section: "Comunicação" },
-  { label: "Diretório de Contatos", to: "/contatos", icon: Users2, section: "Pessoas" },
-  { label: "Equipamentos de TI", to: "/admin/equipamentos-ti", icon: Wrench, section: "Administrativo", adminOnly: true },
+  { label: "Diretório de Contatos", to: "/diretorio", icon: Users2, section: "Pessoas" },
+
+  { label: "Equipamentos", to: "/equipamentos", icon: Wrench, section: "Administrativo", adminOnly: true },
   { label: "Painel Admin", to: "/admin", icon: Settings, section: "Administrativo", adminOnly: true },
 ];
 
@@ -48,7 +50,7 @@ function SectionHeader({ children, collapsed }: { children: React.ReactNode; col
   );
 }
 
-export const Sidebar: React.FC = () => {
+const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const inRouter = useInRouterContext();
@@ -72,11 +74,17 @@ export const Sidebar: React.FC = () => {
     return Array.from(map.entries());
   }, [items]);
 
-  const Wrapper: React.FC<{ to: string; title?: string; className?: string }> = ({ to, title, className, children }) => {
+  const Wrapper: React.FC<{ to: string; title?: string }> = ({ to, title, children }) => {
     if (!inRouter) {
       return (
-        <div className={[ "mx-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700",
-          collapsed ? "justify-center" : "", "cursor-default select-none"].join(" ")} title={title}>
+        <div
+          className={[
+            "mx-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700",
+            collapsed ? "justify-center" : "",
+            "cursor-default select-none",
+          ].join(" ")}
+          title={title}
+        >
           {children}
         </div>
       );
@@ -86,7 +94,6 @@ export const Sidebar: React.FC = () => {
       "mx-2 flex items-center gap-3 rounded-xl px-3 py-2.5 transition",
       active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100",
       collapsed ? "justify-center" : "",
-      className || "",
     ].join(" ");
     return (
       <NavLink to={to} title={title} className={cls}>
@@ -175,9 +182,7 @@ export const Sidebar: React.FC = () => {
             } catch {
               localStorage.clear();
               sessionStorage.clear();
-              if (inRouter) {
-                window.location.href = "/login";
-              }
+              if (inRouter) window.location.href = "/login";
             }
           }}
           className={`w-full inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium
