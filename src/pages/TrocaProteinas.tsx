@@ -78,25 +78,54 @@ export const TrocaProteinas: React.FC = () => {
     setTrocas(prev => ({ ...prev, [date]: value }));
   };
 
+  const proteinOptions = useMemo(
+    () => Array.from(new Set(menu.map(m => m.proteina))).sort(),
+    [menu]
+  );
+
+  const contagemProteinas = useMemo(() => {
+    const mapa = new Map<string, number>();
+    menu.forEach(m => {
+      mapa.set(m.proteina, (mapa.get(m.proteina) || 0) + 1);
+    });
+    return Array.from(mapa.entries());
+  }, [menu]);
+
+  const getIcon = (p: string) => {
+    const prot = p.toLowerCase();
+    if (prot.includes('frango')) return <Drumstick className="w-5 h-5 text-orange-500" />;
+    if (prot.includes('peixe')) return <Fish className="w-5 h-5 text-blue-500" />;
+    if (prot.includes('carne') || prot.includes('bovina') || prot.includes('porco'))
+      return <Beef className="w-5 h-5 text-red-500" />;
+    if (prot.includes('ovo')) return <Egg className="w-5 h-5 text-yellow-500" />;
+    if (prot.includes('veg')) return <Leaf className="w-5 h-5 text-green-500" />;
+    return null;
+  };
+
   const enviar = async () => {
-    const entries = Object.entries(trocas).filter(([d, v]) => v && !existentes[d]);
-    try {
-      for (const [data, proteina_nova] of entries) {
+    const payload = Object.entries(trocas)
+      .filter(([d, v]) => v && !existentes[d])
+      .map(([data, proteina_nova]) => {
         const item = menu.find(m => {
           const [dd, mm, yyyy] = m.data.split('/');
           return `${yyyy}-${mm}-${dd}` === data;
         });
-        const proteina_original = item?.proteina || '';
-        const res = await fetch('/api/trocas-proteina', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: tokenHeader,
-          },
-          body: JSON.stringify({ data, proteina_original, proteina_nova }),
-        });
-        if (!res.ok) throw new Error();
-      }
+        return { data, proteina_original: item?.proteina || '', proteina_nova };
+      });
+    if (!payload.length) {
+      toast.error('Nenhuma troca selecionada');
+      return;
+    }
+    try {
+      const res = await fetch('/api/trocas-proteina', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: tokenHeader,
+        },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error();
       toast.success('Trocas enviadas!');
       setTrocas({});
       await carregarTrocas();
@@ -105,19 +134,20 @@ export const TrocaProteinas: React.FC = () => {
     }
   };
 
-  const proteinOptions = ['Frango', 'Peixe', 'Carne', 'Ovo', 'Veggie'];
-  const icons: Record<string, JSX.Element> = {
-    Frango: <Drumstick className="w-5 h-5 text-orange-500" />,
-    Peixe: <Fish className="w-5 h-5 text-blue-500" />,
-    Carne: <Beef className="w-5 h-5 text-red-500" />,
-    Ovo: <Egg className="w-5 h-5 text-yellow-500" />,
-    Veggie: <Leaf className="w-5 h-5 text-green-500" />,
-  };
-
   return (
     <Layout>
       <div className="space-y-6">
         <h1 className="text-2xl font-bold text-gray-900">Troca de Proteína</h1>
+        {contagemProteinas.length > 0 && (
+          <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+            {contagemProteinas.map(([p, c]) => (
+              <span key={p} className="flex items-center gap-1">
+                {getIcon(p)}
+                {p} ({c})
+              </span>
+            ))}
+          </div>
+        )}
         <div className="bg-white rounded-lg shadow divide-y">
           {diasUteis.map(date => {
             const key = format(date, 'yyyy-MM-dd');
@@ -134,7 +164,7 @@ export const TrocaProteinas: React.FC = () => {
                     {format(date, 'dd/MM EEEE', { locale: ptBR })}
                   </p>
                   <div className="flex items-center space-x-2 text-sm text-gray-600">
-                    {icons[original] || null}
+                    {getIcon(original)}
                     <span>{original}</span>
                   </div>
                 </div>

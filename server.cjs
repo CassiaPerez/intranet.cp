@@ -11,6 +11,7 @@ const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const ExcelJS = require('exceljs');
 const PDFDocument = require('pdfkit');
+const nodemailer = require('nodemailer');
 const { format, parseISO } = require('date-fns');
 const { ptBR } = require('date-fns/locale');
 
@@ -43,6 +44,16 @@ const roomCalendars = {
   recepcao: 'sala.recepcao@group.calendar.google.com',
 };
 
+const rhEmail = process.env.RH_EMAIL || 'rh@cropfield.com';
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : 587,
+  secure: false,
+  auth: process.env.SMTP_USER
+    ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    : undefined,
+});
+
 // Helpers Promises
 const run = (sql, params = []) =>
   new Promise((resolve, reject) => {
@@ -59,6 +70,23 @@ const get = (sql, params = []) =>
   new Promise((resolve, reject) => {
     db.get(sql, params, (err, row) => (err ? reject(err) : resolve(row)));
   });
+
+async function notifyRH(user, trocas) {
+  if (!trocas.length) return;
+  const lines = trocas
+    .map(t => `${format(parseISO(t.data), 'dd/MM/yyyy')} - ${t.proteina_original} -> ${t.proteina_nova}`)
+    .join('\n');
+  try {
+    await transporter.sendMail({
+      to: rhEmail,
+      from: process.env.MAIL_FROM || rhEmail,
+      subject: `Trocas de proteína - ${user.name}`,
+      text: `Usuário: ${user.name} (${user.email})\n${lines}`,
+    });
+  } catch (err) {
+    console.error('Erro ao enviar email RH', err);
+  }
+}
 
 // -------------------------------------------------------------
 // DDL - Tabelas e View
@@ -444,25 +472,34 @@ app.get('/api/agendamentos-portaria', async (_req, res) => {
 // -------------------------------------------------------------
 app.post('/api/trocas-proteina', async (req, res) => {
   try {
-    const { data, proteina_original, proteina_nova } = req.body;
-    if (!data || !proteina_original || !proteina_nova) {
-      return res.status(400).json({ ok: false, error: 'Campos: data, proteina_original, proteina_nova' });
+    const payload = Array.isArray(req.body) ? req.body : [req.body];
+    const inseridas = [];
+    for (const item of payload) {
+      const { data, proteina_original, proteina_nova } = item;
+      if (!data || !proteina_original || !proteina_nova) continue;
+      const exists = await get(
+        `SELECT id FROM trocas_proteina WHERE email = ? AND date(data) = date(?)`,
+        [req.user.email, data]
+      );
+      if (exists) continue;
+      const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
+      const info = await run(
+        `INSERT INTO trocas_proteina (data, dia, proteina_original, proteina_nova, email, nome)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [data, dia, proteina_original, proteina_nova, req.user.email, req.user.name]
+      );
+      await registrarPontos({
+        email: req.user.email,
+        nome: req.user.name,
+        acao: 'troca_proteina',
+        pontos: 5,
+        refTable: 'trocas_proteina',
+        refId: info.lastID,
+      });
+      inseridas.push({ data, proteina_original, proteina_nova });
     }
-    const exists = await get(
-      `SELECT id FROM trocas_proteina WHERE email = ? AND date(data) = date(?)`,
-      [req.user.email, data]
-    );
-    if (exists) {
-      return res.status(400).json({ ok: false, error: 'Troca já registrada para esta data' });
-    }
-    const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
-    const info = await run(
-      `INSERT INTO trocas_proteina (data, dia, proteina_original, proteina_nova, email, nome)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [data, dia, proteina_original, proteina_nova, req.user.email, req.user.name]
-    );
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'troca_proteina', pontos: 5, refTable: 'trocas_proteina', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
+    await notifyRH(req.user, inseridas);
+    res.json({ ok: true, count: inseridas.length });
   } catch (e) {
     console.error('POST /api/trocas-proteina', e);
     res.status(500).json({ ok: false, error: 'Erro ao salvar troca de proteína' });
