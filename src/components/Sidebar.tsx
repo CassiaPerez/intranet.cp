@@ -1,6 +1,10 @@
 // src/components/Sidebar.tsx
 import React, { useMemo, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import {
+  NavLink,
+  useLocation,
+  useInRouterContext,
+} from "react-router-dom";
 import {
   Home,
   CalendarDays,
@@ -15,29 +19,23 @@ import {
   LogOut,
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import { useGamification } from "../contexts/GamificationContext";
 
 type MenuItem = {
   label: string;
   to: string;
   icon: React.ElementType;
   section?: string;
-  adminOnly?: boolean; // aparece só para TI/RH
+  adminOnly?: boolean; // só TI/RH
 };
 
 const baseItems: MenuItem[] = [
   { label: "Início", to: "/", icon: Home, section: "Principal" },
-
   { label: "Reservas de Salas", to: "/reservas", icon: CalendarDays, section: "Reservas" },
   { label: "Agendamentos Portaria", to: "/portaria", icon: DoorOpen, section: "Reservas" },
-
   { label: "Cardápio do Mês", to: "/cardapio", icon: Utensils, section: "Refeitório" },
   { label: "Troca de Proteínas", to: "/trocas-proteina", icon: Repeat2, section: "Refeitório" },
-
   { label: "Mural de Informações", to: "/mural", icon: Megaphone, section: "Comunicação" },
   { label: "Diretório de Contatos", to: "/contatos", icon: Users2, section: "Pessoas" },
-
-  // itens administrativos (renderizados condicionalmente)
   { label: "Equipamentos de TI", to: "/admin/equipamentos-ti", icon: Wrench, section: "Administrativo", adminOnly: true },
   { label: "Painel Admin", to: "/admin", icon: Settings, section: "Administrativo", adminOnly: true },
 ];
@@ -52,21 +50,18 @@ function SectionHeader({ children, collapsed }: { children: React.ReactNode; col
 
 export const Sidebar: React.FC = () => {
   const { user, logout } = useAuth();
-  const { userPoints } = useGamification?.() ?? ({} as any);
   const [collapsed, setCollapsed] = useState(false);
-  const location = useLocation();
+  const inRouter = useInRouterContext();
+  const location = inRouter ? useLocation() : (null as any);
 
-  const isAdmin = useMemo(() => {
-    // Ajuste conforme seu AuthContext (setor/role/cargo)
-    const setor = (user as any)?.setor || (user as any)?.role || (user as any)?.department;
-    return setor === "TI" || setor === "RH";
-  }, [user]);
+  const setor = (user as any)?.setor || (user as any)?.role || (user as any)?.department;
+  const isAdmin = setor === "TI" || setor === "RH";
 
-  const items = useMemo(() => {
-    return baseItems.filter((it) => (it.adminOnly ? isAdmin : true));
-  }, [isAdmin]);
+  const items = useMemo(
+    () => baseItems.filter((it) => (it.adminOnly ? isAdmin : true)),
+    [isAdmin]
+  );
 
-  // Agrupar por seção
   const grouped = useMemo(() => {
     const map = new Map<string, MenuItem[]>();
     for (const it of items) {
@@ -76,6 +71,29 @@ export const Sidebar: React.FC = () => {
     }
     return Array.from(map.entries());
   }, [items]);
+
+  const Wrapper: React.FC<{ to: string; title?: string; className?: string }> = ({ to, title, className, children }) => {
+    if (!inRouter) {
+      return (
+        <div className={[ "mx-2 flex items-center gap-3 rounded-xl px-3 py-2.5 text-slate-700",
+          collapsed ? "justify-center" : "", "cursor-default select-none"].join(" ")} title={title}>
+          {children}
+        </div>
+      );
+    }
+    const active = location.pathname === to || location.pathname.startsWith(to + "/");
+    const cls = [
+      "mx-2 flex items-center gap-3 rounded-xl px-3 py-2.5 transition",
+      active ? "bg-slate-900 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100",
+      collapsed ? "justify-center" : "",
+      className || "",
+    ].join(" ");
+    return (
+      <NavLink to={to} title={title} className={cls}>
+        {children}
+      </NavLink>
+    );
+  };
 
   return (
     <aside
@@ -94,7 +112,7 @@ export const Sidebar: React.FC = () => {
           {!collapsed && (
             <div className="min-w-0">
               <div className="font-semibold leading-5 truncate">Intranet Cropfield</div>
-              <div className="text-xs text-slate-500">Bem-vindo(a)</div>
+              <div className="text-xs text-slate-500">{inRouter ? "Bem-vindo(a)" : "Carregando..."}</div>
             </div>
           )}
         </div>
@@ -125,11 +143,6 @@ export const Sidebar: React.FC = () => {
             <div className="text-xs text-slate-500 truncate">
               {(user as any)?.email || ""}
             </div>
-            {typeof userPoints === "number" && (
-              <div className="mt-1 inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border border-amber-300 bg-amber-50">
-                <span className="font-semibold">{userPoints}</span> pontos
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -140,29 +153,14 @@ export const Sidebar: React.FC = () => {
           <div key={section}>
             <SectionHeader collapsed={collapsed}>{section}</SectionHeader>
             <ul className="space-y-1">
-              {links.map(({ label, to, icon: Icon }) => {
-                const active = location.pathname === to || location.pathname.startsWith(to + "/");
-                return (
-                  <li key={to}>
-                    <NavLink
-                      to={to}
-                      className={({ isActive }) =>
-                        [
-                          "mx-2 flex items-center gap-3 rounded-xl px-3 py-2.5 transition",
-                          isActive || active
-                            ? "bg-slate-900 text-white shadow-sm"
-                            : "text-slate-700 hover:bg-slate-100",
-                          collapsed ? "justify-center" : "",
-                        ].join(" ")
-                      }
-                      title={collapsed ? label : undefined}
-                    >
-                      <Icon className="h-5 w-5 shrink-0" />
-                      {!collapsed && <span className="truncate">{label}</span>}
-                    </NavLink>
-                  </li>
-                );
-              })}
+              {links.map(({ label, to, icon: Icon }) => (
+                <li key={to}>
+                  <Wrapper to={to} title={collapsed ? label : undefined}>
+                    <Icon className="h-5 w-5 shrink-0" />
+                    {!collapsed && <span className="truncate">{label}</span>}
+                  </Wrapper>
+                </li>
+              ))}
             </ul>
           </div>
         ))}
@@ -174,11 +172,12 @@ export const Sidebar: React.FC = () => {
           onClick={() => {
             try {
               logout?.();
-            } catch (_) {
-              // fallback: limpa storage
+            } catch {
               localStorage.clear();
               sessionStorage.clear();
-              window.location.href = "/login";
+              if (inRouter) {
+                window.location.href = "/login";
+              }
             }
           }}
           className={`w-full inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium
