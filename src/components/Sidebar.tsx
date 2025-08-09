@@ -29,15 +29,11 @@ type MenuItem = {
 
 const baseItems: MenuItem[] = [
   { label: "Início", to: "/", icon: Home, section: "Principal" },
-
   { label: "Reservas de Salas", to: "/reservas", icon: CalendarDays, section: "Reservas" },
-
   { label: "Cardápio do Mês", to: "/cardapio", icon: Utensils, section: "Refeitório" },
   { label: "Troca de Proteínas", to: "/troca-proteina", icon: Repeat2, section: "Refeitório" },
-
   { label: "Mural de Informações", to: "/mural", icon: Megaphone, section: "Comunicação" },
   { label: "Diretório de Contatos", to: "/diretorio", icon: Users2, section: "Pessoas" },
-
   { label: "Equipamentos", to: "/equipamentos", icon: Wrench, section: "Administrativo", adminOnly: true },
   { label: "Painel Admin", to: "/admin", icon: Settings, section: "Administrativo", adminOnly: true },
 ];
@@ -50,7 +46,7 @@ function SectionHeader({ children, collapsed }: { children: React.ReactNode; col
   );
 }
 
-const Sidebar: React.FC = () => {
+const SidebarComponent: React.FC = () => {
   const { user, logout } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const inRouter = useInRouterContext();
@@ -202,4 +198,7 @@ const Sidebar: React.FC = () => {
   );
 };
 
+// ✅ Exporta dos dois jeitos
+const Sidebar = SidebarComponent;
+export { Sidebar };
 export default Sidebar;
