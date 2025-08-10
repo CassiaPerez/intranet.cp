@@ -6,6 +6,8 @@ import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 
+const API_BASE = 'http://localhost:3001';
+
 type CardapioItem = {
   id?: string;
   dia?: string;
@@ -142,29 +144,35 @@ const TrocaProteinas: React.FC = () => {
       toast('Nenhuma troca para salvar.');
       return;
     }
+    
     try {
-      const res = await fetch(`/api/trocas-proteina/bulk?ano=${ano}&mes=${mes}`, {
+      const res = await fetch(`${API_BASE}/api/trocas-proteina/bulk`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ trocas: payload }),
       });
-      if (!res.ok) throw new Error();
+      
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || 'Erro ao salvar');
+      }
+      
       const out = await res.json();
-      toast.success(`Trocas salvas (${out.inseridas || payload.length}).`);
-    } catch {
+      
+      if (out.totalPoints > 0) {
+        toast.success(`${out.inseridas} trocas salvas! +${out.totalPoints} pontos`);
+      } else {
+        toast.success(`${out.inseridas} trocas salvas!`);
+      }
+      
+      // Clear saved exchanges
+      setTrocas({});
+    } catch (error) {
+      console.error('Erro ao salvar trocas:', error);
       toast.error('Falha ao salvar trocas.');
     }
   };
-
-  // Header de auth (compatível com seu middleware base64(JSON))
-  function authHeader() {
-    let token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
-    if (!token) {
-      const payload = { email: user?.email || 'dev@local', name: user?.name || 'Dev', sector: (user as any)?.setor || 'TI' };
-      token = btoa(JSON.stringify(payload));
-    }
-    return { Authorization: `Bearer ${token}` };
-  }
 
   // Resumo simples
   const totalSelecionadas = Object.values(trocas).filter(t => t.proteina_nova && t.proteina_nova !== t.proteina_original && t.proteina_original).length;

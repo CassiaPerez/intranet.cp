@@ -1,4 +1,5 @@
 import React from 'react';
+import { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { 
   Calendar, 
@@ -13,57 +14,104 @@ import {
   Home
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { useGamification } from '../contexts/GamificationContext';
+import toast from 'react-hot-toast';
+
+const API_BASE = 'http://localhost:3001';
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();
-  const { userStats, getTopUsers, getTotalActivities, getActivityByType, getUserRank } = useGamification();
+  const [pontos, setPontos] = useState({ totalPontos: 0, breakdown: [] });
+  const [ranking, setRanking] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Icon mapping for different activity types
-  const activityIcons = {
-    page_visit: Home,
-    protein_exchange: UtensilsCrossed,
-    room_reservation: Calendar,
-    reception_appointment: Users,
-    post_creation: MessageSquare,
-    comment: MessageSquare,
-    reaction: Star,
-    equipment_request: Monitor,
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    try {
+      const [pontosRes, rankingRes] = await Promise.all([
+        fetch(`${API_BASE}/api/pontos/minha-conta`, { credentials: 'include' }),
+        fetch(`${API_BASE}/api/pontos/ranking`, { credentials: 'include' })
+      ]);
+
+      if (pontosRes.ok) {
+        const pontosData = await pontosRes.json();
+        setPontos(pontosData);
+      }
+
+      if (rankingRes.ok) {
+        const rankingData = await rankingRes.json();
+        setRanking(rankingData.ranking || []);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar dados do dashboard:', error);
+      toast.error('Erro ao carregar dados do dashboard');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getActionLabel = (acao) => {
+    const labels = {
+      'MURAL_LIKE': 'Curtidas no Mural',
+      'MURAL_COMMENT': 'Comentários no Mural',
+      'RESERVA_CREATE': 'Reservas Criadas',
+      'PORTARIA_CREATE': 'Agendamentos da Portaria',
+      'TROCA_PROTEINA': 'Trocas de Proteína'
+    };
+    return labels[acao] || acao;
+  };
+
+  const getUserRank = () => {
+    const userIndex = ranking.findIndex(r => r.nome === user?.nome);
+    return userIndex >= 0 ? userIndex + 1 : '-';
+  };
+
+  const getUserLevel = (totalPontos) => {
+    if (totalPontos < 50) return 1;
+    if (totalPontos < 150) return 2;
+    if (totalPontos < 300) return 3;
+    if (totalPontos < 500) return 4;
+    return 5;
   };
 
   const stats = [
-    { title: 'Salas Reservadas', value: getActivityByType('room_reservation').toString(), icon: Calendar, color: 'bg-blue-500' },
-    { title: 'Trocas de Proteína', value: getActivityByType('protein_exchange').toString(), icon: UtensilsCrossed, color: 'bg-green-500' },
-    { title: 'Equipamentos Solicitados', value: getActivityByType('equipment_request').toString(), icon: Monitor, color: 'bg-purple-500' },
-    { title: 'Publicações no Mural', value: getActivityByType('post_creation').toString(), icon: MessageSquare, color: 'bg-orange-500' },
-  ];
-
-  const recentActivities = [
-    {
-      id: 1,
-      type: 'reserva',
-      message: 'Sala Aquário reservada para reunião',
-      time: '2 horas atrás',
-      icon: Calendar,
+    { 
+      title: 'Pontos Totais (Mês)', 
+      value: pontos.totalPontos.toString(), 
+      icon: Star, 
+      color: 'bg-yellow-500' 
     },
-    {
-      id: 2,
-      type: 'cardapio',
-      message: 'Troca de proteína solicitada para amanhã',
-      time: '4 horas atrás',
-      icon: UtensilsCrossed,
+    { 
+      title: 'Posição no Ranking', 
+      value: `#${getUserRank()}`, 
+      icon: Trophy, 
+      color: 'bg-purple-500' 
     },
-    {
-      id: 3,
-      type: 'mural',
-      message: 'Nova publicação no mural de informações',
-      time: '1 dia atrás',
-      icon: MessageSquare,
+    { 
+      title: 'Nível Atual', 
+      value: getUserLevel(pontos.totalPontos).toString(), 
+      icon: TrendingUp, 
+      color: 'bg-blue-500' 
+    },
+    { 
+      title: 'Ações Realizadas', 
+      value: pontos.breakdown.reduce((sum, b) => sum + b.count, 0).toString(), 
+      icon: MessageSquare, 
+      color: 'bg-green-500' 
     },
   ];
 
-  const topUsers = getTopUsers(5);
-  const userRank = getUserRank(user?.id || '');
+  if (loading) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+        </div>
+      </Layout>
+    );
+  }
 
   return (
     <Layout>
@@ -73,7 +121,7 @@ export const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold mb-2">
-                Olá, {user?.name?.split(' ')[0]}! 👋
+                Olá, {user?.nome?.split(' ')[0]}! 👋
               </h1>
               <p className="text-blue-100 mb-4">
                 Bem-vindo de volta à Intranet do Grupo Cropfield
@@ -81,15 +129,15 @@ export const Dashboard: React.FC = () => {
               <div className="flex items-center space-x-4">
                 <div className="flex items-center space-x-2">
                   <Star className="w-5 h-5 text-yellow-300 fill-current" />
-                  <span className="font-semibold">{userStats?.totalPoints || 0} pontos</span>
+                  <span className="font-semibold">{pontos.totalPontos} pontos</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <Trophy className="w-5 h-5 text-yellow-300" />
-                  <span className="font-semibold">Nível {userStats?.level || 1}</span>
+                  <span className="font-semibold">Nível {getUserLevel(pontos.totalPontos)}</span>
                 </div>
                 <div className="flex items-center space-x-2">
                   <span className="text-sm bg-white bg-opacity-20 px-2 py-1 rounded-full">
-                    #{userRank} no ranking
+                    #{getUserRank()} no ranking
                   </span>
                 </div>
               </div>
@@ -120,40 +168,36 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Activities */}
+          {/* Points Breakdown */}
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-gray-900">Atividades Recentes</h2>
-              <span className="text-sm text-gray-500">{getTotalActivities()} atividades totais</span>
+              <h2 className="text-xl font-bold text-gray-900">Meus Pontos (Mês Atual)</h2>
+              <span className="text-sm text-gray-500">{pontos.totalPontos} pontos totais</span>
             </div>
             <div className="space-y-4">
-              {(userStats?.activities.slice(0, 5) || recentActivities).map((activity, index) => (
-                <div key={activity.id} className="flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
+              {pontos.breakdown.map((item, index) => (
+                <div key={index} className="flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="bg-blue-100 rounded-lg p-2">
-                    {(() => {
-                      const IconComponent = activity.icon || activityIcons[activity.type as keyof typeof activityIcons] || Home;
-                      return <IconComponent className="w-5 h-5 text-blue-600" />;
-                    })()}
+                    <Star className="w-5 h-5 text-blue-600" />
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-medium text-gray-900">
-                      {activity.description || activity.message}
+                      {getActionLabel(item.acao)}
                     </p>
                     <div className="flex items-center space-x-1 mt-1">
-                      <Clock className="w-3 h-3 text-gray-400" />
-                      <p className="text-xs text-gray-500">
-                        {activity.timestamp ? new Date(activity.timestamp).toLocaleString('pt-BR') : activity.time}
-                      </p>
-                      {activity.points && (
-                        <>
-                          <span className="text-xs text-gray-400">•</span>
-                          <span className="text-xs text-green-600">+{activity.points} pts</span>
-                        </>
-                      )}
+                      <span className="text-xs text-gray-500">{item.count} ações</span>
+                      <span className="text-xs text-gray-400">•</span>
+                      <span className="text-xs text-green-600">{item.total} pts</span>
                     </div>
                   </div>
                 </div>
               ))}
+              {pontos.breakdown.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <p>Nenhuma atividade este mês</p>
+                  <p className="text-sm">Comece interagindo com a intranet para ganhar pontos!</p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -161,7 +205,7 @@ export const Dashboard: React.FC = () => {
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
             <h2 className="text-xl font-bold text-gray-900 mb-6">Ranking de Usuários</h2>
             <div className="space-y-4">
-              {topUsers.map((topUser, index) => (
+              {ranking.slice(0, 10).map((topUser, index) => (
                 <div key={index} className="flex items-center space-x-4 p-3 rounded-lg hover:bg-gray-50 transition-colors">
                   <div className="flex items-center space-x-3">
                     <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
@@ -172,57 +216,39 @@ export const Dashboard: React.FC = () => {
                       {index + 1}
                     </span>
                     <img
-                      src={topUser.userAvatar}
-                      alt={topUser.userName}
+                      src={topUser.foto || 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150'}
+                      alt={topUser.nome}
                       className="w-10 h-10 rounded-full object-cover"
                     />
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center space-x-2">
-                      <p className="font-medium text-gray-900">{topUser.userName}</p>
-                      {topUser.userId === user?.id && (
+                      <p className="font-medium text-gray-900">{topUser.nome}</p>
+                      {topUser.nome === user?.nome && (
                         <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded-full">Você</span>
                       )}
                     </div>
                     <div className="flex items-center space-x-3 mt-1">
                       <div className="flex items-center space-x-1">
                         <Star className="w-3 h-3 text-yellow-500 fill-current" />
-                        <span className="text-xs text-gray-600">{topUser.totalPoints} pts</span>
+                        <span className="text-xs text-gray-600">{topUser.total_pontos} pts</span>
                       </div>
                       <div className="flex items-center space-x-1">
                         <Trophy className="w-3 h-3 text-blue-500" />
-                        <span className="text-xs text-gray-600">Nível {topUser.level}</span>
+                        <span className="text-xs text-gray-600">Nível {getUserLevel(topUser.total_pontos)}</span>
                       </div>
-                      {topUser.badges.length > 0 && (
-                        <div className="flex items-center space-x-1">
-                          <span className="text-xs text-gray-400">•</span>
-                          <span className="text-xs text-purple-600">{topUser.badges[0]}</span>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
               ))}
+              {ranking.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  <p>Nenhum usuário no ranking este mês</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
-
-        {/* User Badges */}
-        {userStats && userStats.badges.length > 0 && (
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Suas Conquistas</h2>
-            <div className="flex flex-wrap gap-2">
-              {userStats.badges.map((badge, index) => (
-                <span
-                  key={index}
-                  className="px-3 py-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white text-sm font-medium rounded-full"
-                >
-                  🏆 {badge}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </Layout>
   );

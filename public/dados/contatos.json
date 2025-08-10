@@ -1,0 +1,102 @@
+[
+  {
+    "id": 1,
+    "nome": "João Silva",
+    "email": "joao.silva@grupocropfield.com.br",
+    "ramal": "1001",
+    "setor": "Vendas",
+    "cargo": "Gerente de Vendas",
+    "cidade": "São Paulo",
+    "telefone": "(11) 99999-1234"
+  },
+  {
+    "id": 2,
+    "nome": "Maria Santos",
+    "email": "maria.santos@grupocropfield.com.br",
+    "ramal": "1002",
+    "setor": "RH",
+    "cargo": "Analista de RH",
+    "cidade": "São Paulo",
+    "telefone": "(11) 99999-5678"
+  },
+  {
+    "id": 3,
+    "nome": "Carlos Oliveira",
+    "email": "carlos.oliveira@grupocropfield.com.br",
+    "ramal": "1003",
+    "setor": "TI",
+    "cargo": "Desenvolvedor Senior",
+    "cidade": "São Paulo",
+    "telefone": "(11) 99999-9012"
+  },
+  {
+    "id": 4,
+    "nome": "Ana Costa",
+    "email": "ana.costa@grupocropfield.com.br",
+    "ramal": "1004",
+    "setor": "Financeiro",
+    "cargo": "Contadora",
+    "cidade": "Rio de Janeiro",
+    "telefone": "(21) 99999-3456"
+  },
+  {
+    "id": 5,
+    "nome": "Roberto Lima",
+    "email": "roberto.lima@grupocropfield.com.br",
+    "ramal": "2001",
+    "setor": "Produção",
+    "cargo": "Supervisor de Produção",
+    "cidade": "Belo Horizonte",
+    "telefone": "(31) 99999-7890"
+  },
+  {
+    "id": 6,
+    "nome": "Fernanda Alves",
+    "email": "fernanda.alves@grupocropfield.com.br",
+    "ramal": "1005",
+    "setor": "Marketing",
+    "cargo": "Coordenadora de Marketing",
+    "cidade": "São Paulo",
+    "telefone": "(11) 99999-2468"
+  },
+  {
+    "id": 7,
+    "nome": "Pedro Souza",
+    "email": "pedro.souza@grupocropfield.com.br",
+    "ramal": "1006",
+    "setor": "Vendas",
+    "cargo": "Vendedor",
+    "cidade": "Curitiba",
+    "telefone": "(41) 99999-1357"
+  },
+  {
+    "id": 8,
+    "nome": "Juliana Pereira",
+    "email": "juliana.pereira@grupocropfield.com.br",
+    "ramal": "1007",
+    "setor": "RH",
+    "cargo": "Gerente de RH",
+    "cidade": "São Paulo",
+    "telefone": "(11) 99999-8642"
+  },
+  {
+    "id": 9,
+    "nome": "Ricardo Mendes",
+    "email": "ricardo.mendes@grupocropfield.com.br",
+    "ramal": "1008",
+    "setor": "TI",
+    "cargo": "Analista de Sistemas",
+    "cidade": "São Paulo",
+    "telefone": "(11) 99999-9753"
+  },
+  {
+    "id": 10,
+    "nome": "Camila Torres",
+    "email": "camila.torres@grupocropfield.com.br",
+    "ramal": "1009",
+    "setor": "Financeiro",
+    "cargo": "Analista Financeiro",
+    "cidade": "Rio de Janeiro",
+    "telefone": "(21) 99999-1598"
+  }
+]

@@ -1,7 +1,7 @@
 // server.cjs
 // -------------------------------------------------------------
-// Backend Express + SQLite (sqlite3 async, compatível com bolt.new)
-// Funcionalidades: Reservas, Portaria, Trocas, Mural, TI, Gamificação
+// Backend Express + SQLite + Google OAuth + Points System
+// Funcionalidades: OAuth, Pontos, Ranking Mensal, Reservas, Portaria, Trocas, Mural
 // -------------------------------------------------------------
 const express = require('express');
 const cors = require('cors');
@@ -9,23 +9,48 @@ const morgan = require('morgan');
 const fs = require('fs');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
-const ExcelJS = require('exceljs');
-const PDFDocument = require('pdfkit');
+const passport = require('passport');
+const GoogleStrategy = require('passport-google-oauth20').Strategy;
+const jwt = require('jsonwebtoken');
+const cookieParser = require('cookie-parser');
 const { format, parseISO } = require('date-fns');
 const { ptBR } = require('date-fns/locale');
 
 const app = express();
-const PORT = process.env.PORT || 5173; // backend em 3000 (Vite fica em 5173)
+const PORT = process.env.PORT || 3001;
+
+// Load environment variables
+require('dotenv').config();
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const OAUTH_CALLBACK_URL = process.env.OAUTH_CALLBACK_URL || 'http://localhost:3001/auth/google/callback';
+
+// Points system configuration
+const POINTS = {
+  MURAL_LIKE: 5,
+  MURAL_COMMENT: 10,
+  RESERVA_CREATE: 10,
+  PORTARIA_CREATE: 10,
+  TROCA_PROTEINA: 5
+};
 
 // -------------------------------------------------------------
-// Infra básica
+// Middleware setup
 // -------------------------------------------------------------
-app.use(cors());
+app.use(cors({
+  origin: FRONTEND_URL,
+  credentials: true
+}));
 app.use(express.json({ limit: '2mb' }));
+app.use(cookieParser());
 app.use(morgan('dev'));
+app.use(passport.initialize());
 
 // -------------------------------------------------------------
-// Banco de dados (cria pasta e arquivo se não existirem)
+// Database setup
 // -------------------------------------------------------------
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
@@ -35,16 +60,8 @@ const db = new sqlite3.Database(dbPath, (err) => {
   else console.log('Banco conectado:', dbPath);
 });
 
-// IDs dos calendários do Google para cada sala
-const roomCalendars = {
-  aquario: 'sala.aquario@group.calendar.google.com',
-  reuniao: 'sala.reuniao@group.calendar.google.com',
-  treinamento: 'sala.treinamento@group.calendar.google.com',
-  videoconferencia: 'sala.videoconferencia@group.calendar.google.com'
-};
-
 // -------------------------------------------------------------
-// Helpers para promisificar sqlite3
+// Database helpers
 // -------------------------------------------------------------
 function run(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -74,87 +91,91 @@ function all(sql, params = []) {
 }
 
 // -------------------------------------------------------------
-// Schema do banco
+// Database schema migration
 // -------------------------------------------------------------
-function createSchema() {
+async function createSchema() {
   try {
-    db.run(`CREATE TABLE IF NOT EXISTS reservas_salas (
+    // Users table
+    await run(`CREATE TABLE IF NOT EXISTS usuarios(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      sala TEXT NOT NULL,
-      title TEXT NOT NULL,
-      start DATETIME NOT NULL,
-      end DATETIME NOT NULL,
-      created_by_email TEXT NOT NULL,
-      created_by_name TEXT NOT NULL,
-      google_event_id TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    db.run(`CREATE TABLE IF NOT EXISTS agendamentos_portaria (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      visitante TEXT NOT NULL,
-      documento TEXT,
-      empresa TEXT,
-      motivo TEXT,
-      start DATETIME NOT NULL,
-      end DATETIME NOT NULL,
-      created_by_email TEXT NOT NULL,
-      created_by_name TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    db.run(`CREATE TABLE IF NOT EXISTS trocas_proteina (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      data DATE NOT NULL,
-      dia TEXT NOT NULL,
-      proteina_original TEXT NOT NULL,
-      proteina_nova TEXT NOT NULL,
-      email TEXT NOT NULL,
+      google_id TEXT,
+      email TEXT UNIQUE NOT NULL,
       nome TEXT NOT NULL,
+      foto TEXT,
+      setor TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
-    db.run(`CREATE TABLE IF NOT EXISTS mural_comentarios (
+
+    // Points ledger
+    await run(`CREATE TABLE IF NOT EXISTS pontos(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      post_id INTEGER NOT NULL,
-      usuario_email TEXT NOT NULL,
-      usuario_nome TEXT NOT NULL,
-      conteudo TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    db.run(`CREATE TABLE IF NOT EXISTS mural_reacoes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      post_id INTEGER NOT NULL,
-      usuario_email TEXT NOT NULL,
-      usuario_nome TEXT NOT NULL,
-      tipo TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(post_id, usuario_email, tipo)
-    )`);
-    db.run(`CREATE TABLE IF NOT EXISTS solicitacoes_ti (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      usuario_email TEXT NOT NULL,
-      usuario_nome TEXT NOT NULL,
-      equipamento TEXT NOT NULL,
-      descricao TEXT,
-      status TEXT DEFAULT 'pendente',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    db.run(`CREATE TABLE IF NOT EXISTS pontos_gamificacao (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      usuario_email TEXT NOT NULL,
-      usuario_nome TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
       acao TEXT NOT NULL,
       pontos INTEGER NOT NULL,
-      ref_table TEXT,
-      ref_id INTEGER,
+      meta TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
-    db.run(`CREATE TABLE IF NOT EXISTS mural_posts (
+
+    // Mural tables
+    await run(`CREATE TABLE IF NOT EXISTS mural_posts(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      usuario_email TEXT NOT NULL,
-      usuario_nome TEXT NOT NULL,
-      conteudo TEXT NOT NULL,
-      imagem_url TEXT,
+      titulo TEXT,
+      conteudo TEXT,
+      author TEXT,
+      pinned INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    await run(`CREATE TABLE IF NOT EXISTS mural_likes(
+      post_id INTEGER,
+      user_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(post_id, user_id)
+    )`);
+
+    await run(`CREATE TABLE IF NOT EXISTS mural_comments(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id INTEGER,
+      user_id INTEGER,
+      texto TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Reservations table
+    await run(`CREATE TABLE IF NOT EXISTS reservas(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sala TEXT,
+      data DATE,
+      inicio TEXT,
+      fim TEXT,
+      assunto TEXT,
+      user_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Reception appointments
+    await run(`CREATE TABLE IF NOT EXISTS portaria_agendamentos(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data DATE,
+      hora TEXT,
+      visitante TEXT,
+      documento TEXT,
+      observacao TEXT,
+      user_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // Protein exchanges
+    await run(`CREATE TABLE IF NOT EXISTS trocas_proteina(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data DATE,
+      dia TEXT,
+      proteina_original TEXT,
+      proteina_nova TEXT,
+      user_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
     console.log('Schema criado/verificado com sucesso');
   } catch (e) {
     console.error('Erro ao criar schema:', e);
@@ -164,520 +185,425 @@ function createSchema() {
 createSchema();
 
 // -------------------------------------------------------------
-// Middleware de autenticação simulada
+// Points system helper
+// -------------------------------------------------------------
+async function registrarPontos(user_id, acao, pontos, meta = null) {
+  try {
+    await run(
+      "INSERT INTO pontos(user_id, acao, pontos, meta) VALUES(?, ?, ?, ?)",
+      [user_id, acao, pontos, meta ? JSON.stringify(meta) : null]
+    );
+    console.log(`Pontos registrados: ${acao} = +${pontos} para user ${user_id}`);
+  } catch (e) {
+    console.error('Erro ao registrar pontos:', e);
+  }
+}
+
+// -------------------------------------------------------------
+// Google OAuth setup
+// -------------------------------------------------------------
+if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
+  passport.use(new GoogleStrategy({
+    clientID: GOOGLE_CLIENT_ID,
+    clientSecret: GOOGLE_CLIENT_SECRET,
+    callbackURL: OAUTH_CALLBACK_URL
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      const { id: google_id, emails, displayName, photos } = profile;
+      const email = emails[0].value;
+      const nome = displayName;
+      const foto = photos[0]?.value;
+
+      // Upsert user
+      let user = await get("SELECT * FROM usuarios WHERE google_id = ? OR email = ?", [google_id, email]);
+      
+      if (user) {
+        // Update existing user
+        await run(
+          "UPDATE usuarios SET google_id = ?, nome = ?, foto = ? WHERE id = ?",
+          [google_id, nome, foto, user.id]
+        );
+        user = { ...user, google_id, nome, foto };
+      } else {
+        // Create new user
+        const result = await run(
+          "INSERT INTO usuarios(google_id, email, nome, foto, setor) VALUES(?, ?, ?, ?, ?)",
+          [google_id, email, nome, foto, 'Geral']
+        );
+        user = { id: result.lastID, google_id, email, nome, foto, setor: 'Geral' };
+      }
+
+      return done(null, user);
+    } catch (error) {
+      return done(error, null);
+    }
+  }));
+}
+
+// -------------------------------------------------------------
+// Authentication middleware
 // -------------------------------------------------------------
 function authMiddleware(req, res, next) {
-  const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  const token = req.cookies.sid;
+  
+  if (!token) {
     return res.status(401).json({ ok: false, error: 'Token não fornecido' });
   }
   
-  const token = authHeader.substring(7);
   try {
-    const decoded = JSON.parse(Buffer.from(token, 'base64').toString());
-    req.user = decoded;
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.sub;
     next();
   } catch (e) {
     return res.status(401).json({ ok: false, error: 'Token inválido' });
   }
 }
 
-// Aplicar middleware de auth em todas as rotas exceto login
-app.use((req, res, next) => {
-  if (req.path === '/api/login' || req.path === '/api/health') {
-    return next();
+async function getUserMiddleware(req, res, next) {
+  if (!req.userId) {
+    return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
   }
-  return authMiddleware(req, res, next);
-});
-
-// -------------------------------------------------------------
-// Sistema de Pontos/Gamificação
-// -------------------------------------------------------------
-async function registrarPontos({ email, nome, acao, pontos, refTable = null, refId = null }) {
+  
   try {
-    await run(
-      `INSERT INTO pontos_gamificacao (usuario_email, usuario_nome, acao, pontos, ref_table, ref_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [email, nome, acao, pontos, refTable, refId]
-    );
+    const user = await get("SELECT * FROM usuarios WHERE id = ?", [req.userId]);
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Usuário não encontrado' });
+    }
+    req.user = user;
+    next();
   } catch (e) {
-    console.error('Erro ao registrar pontos:', e);
+    return res.status(500).json({ ok: false, error: 'Erro ao buscar usuário' });
   }
 }
 
-app.get('/api/pontos', async (req, res) => {
-  try {
-    const userEmail = req.user.email;
-    const totalRow = await get(
-      `SELECT COALESCE(SUM(pontos), 0) as total FROM pontos_gamificacao WHERE usuario_email = ?`,
-      [userEmail]
-    );
-    const historico = await all(
-      `SELECT acao, pontos, created_at FROM pontos_gamificacao 
-       WHERE usuario_email = ? ORDER BY created_at DESC LIMIT 10`,
-      [userEmail]
-    );
-    res.json({ total: totalRow.total, historico });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+// -------------------------------------------------------------
+// Auth routes
+// -------------------------------------------------------------
+app.get('/auth/google', passport.authenticate('google', {
+  scope: ['profile', 'email']
+}));
 
-app.get('/api/ranking', async (req, res) => {
-  try {
-    const ranking = await all(
-      `SELECT usuario_nome, usuario_email, SUM(pontos) as total_pontos
-       FROM pontos_gamificacao
-       GROUP BY usuario_email, usuario_nome
-       ORDER BY total_pontos DESC
-       LIMIT 10`
-    );
-    res.json(ranking);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+app.get('/auth/google/callback', 
+  passport.authenticate('google', { session: false }),
+  (req, res) => {
+    try {
+      const token = jwt.sign({ sub: req.user.id }, JWT_SECRET, { expiresIn: '7d' });
+      
+      res.cookie('sid', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      });
+      
+      res.redirect(`${FRONTEND_URL}/`);
+    } catch (error) {
+      console.error('Erro no callback OAuth:', error);
+      res.redirect(`${FRONTEND_URL}/login?error=oauth_error`);
+    }
   }
+);
+
+app.post('/auth/logout', (req, res) => {
+  res.clearCookie('sid');
+  res.json({ ok: true, message: 'Logout realizado com sucesso' });
 });
 
 // -------------------------------------------------------------
-// Endpoints básicos
+// API routes
 // -------------------------------------------------------------
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', (req, res) => {
   res.json({ ok: true, message: 'Server running' });
 });
 
-app.post('/api/login', (req, res) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ ok: false, error: 'Email e senha obrigatórios' });
-  }
-  
-  // Simulação de autenticação
-  const user = {
-    email,
-    name: email.split('@')[0],
-    sector: email.includes('ti') ? 'TI' : email.includes('rh') ? 'RH' : 'Geral'
-  };
-  
-  const token = Buffer.from(JSON.stringify(user)).toString('base64');
-  res.json({ ok: true, token, user });
+// Get current user
+app.get('/api/me', authMiddleware, getUserMiddleware, (req, res) => {
+  res.json({
+    ok: true,
+    user: {
+      id: req.user.id,
+      email: req.user.email,
+      nome: req.user.nome,
+      foto: req.user.foto,
+      setor: req.user.setor
+    }
+  });
 });
 
-// -------------------------------------------------------------
-// Reservas de Salas (+10 pontos)
-// -------------------------------------------------------------
-app.post('/api/reservas-salas', async (req, res) => {
+// Get contacts from JSON
+app.get('/api/contatos', (req, res) => {
   try {
-    const { sala, title, start, end } = req.body;
-    if (!sala || !title || !start || !end) {
-      return res.status(400).json({ ok: false, error: 'Campos obrigatórios: sala, title, start, end' });
+    const { q } = req.query;
+    const contatosPath = path.join(__dirname, 'public', 'dados', 'contatos.json');
+    
+    if (!fs.existsSync(contatosPath)) {
+      return res.json([]);
     }
     
-    const info = await run(
-      `INSERT INTO reservas_salas (sala, title, start, end, created_by_email, created_by_name)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [sala, title, start, end, req.user.email, req.user.name]
+    const contatos = JSON.parse(fs.readFileSync(contatosPath, 'utf8'));
+    
+    if (!q) {
+      return res.json(contatos);
+    }
+    
+    const query = q.toLowerCase();
+    const filtered = contatos.filter(contato => 
+      contato.nome.toLowerCase().includes(query) ||
+      contato.email.toLowerCase().includes(query) ||
+      contato.ramal.toLowerCase().includes(query) ||
+      contato.setor.toLowerCase().includes(query)
     );
     
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'reserva_sala', pontos: 10, refTable: 'reservas_salas', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
-  } catch (e) {
-    console.error('POST /api/reservas-salas', e);
-    res.status(500).json({ ok: false, error: 'Erro ao salvar reserva' });
+    res.json(filtered);
+  } catch (error) {
+    console.error('Erro ao buscar contatos:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar contatos' });
   }
 });
 
-app.get('/api/reservas-salas', async (req, res) => {
+// Get user points for current month
+app.get('/api/pontos/minha-conta', authMiddleware, async (req, res) => {
   try {
-    const { sala, from, to } = req.query;
-    let sql = `SELECT * FROM reservas_salas`;
-    const params = [];
-    const conditions = [];
+    const pontos = await all(`
+      SELECT acao, SUM(pontos) as total, COUNT(*) as count
+      FROM pontos 
+      WHERE user_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+      GROUP BY acao
+    `, [req.userId]);
     
-    if (sala) {
-      conditions.push('sala = ?');
-      params.push(sala);
-    }
-    if (from && to) {
-      conditions.push('date(start) BETWEEN date(?) AND date(?)');
-      params.push(from, to);
-    }
+    const totalPontos = pontos.reduce((sum, p) => sum + p.total, 0);
     
-    if (conditions.length) {
-      sql += ' WHERE ' + conditions.join(' AND ');
-    }
-    sql += ' ORDER BY start ASC';
-    
-    const rows = await all(sql, params);
-    res.json(rows);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    res.json({
+      ok: true,
+      totalPontos,
+      breakdown: pontos
+    });
+  } catch (error) {
+    console.error('Erro ao buscar pontos:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar pontos' });
   }
 });
 
-// -------------------------------------------------------------
-// Agendamentos de Portaria (+10 pontos)
-// -------------------------------------------------------------
-app.post('/api/agendamentos-portaria', async (req, res) => {
+// Get monthly ranking
+app.get('/api/pontos/ranking', async (req, res) => {
   try {
-    const { visitante, documento, empresa, motivo, start, end } = req.body;
-    if (!visitante || !start || !end) {
-      return res.status(400).json({ ok: false, error: 'Campos obrigatórios: visitante, start, end' });
-    }
+    const ranking = await all(`
+      SELECT u.nome, u.foto, SUM(p.pontos) as total_pontos
+      FROM pontos p
+      JOIN usuarios u ON p.user_id = u.id
+      WHERE strftime('%Y-%m', p.created_at) = strftime('%Y-%m', 'now')
+      GROUP BY u.id, u.nome, u.foto
+      ORDER BY total_pontos DESC
+      LIMIT 10
+    `);
     
-    const info = await run(
-      `INSERT INTO agendamentos_portaria (visitante, documento, empresa, motivo, start, end, created_by_email, created_by_name)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [visitante, documento, empresa, motivo, start, end, req.user.email, req.user.name]
-    );
-    
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'portaria', pontos: 10, refTable: 'agendamentos_portaria', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
-  } catch (e) {
-    console.error('POST /api/agendamentos-portaria', e);
-    res.status(500).json({ ok: false, error: 'Erro ao salvar agendamento' });
-  }
-});
-
-app.get('/api/agendamentos-portaria', async (_req, res) => {
-  try {
-    const rows = await all(
-      `SELECT id, visitante, documento, empresa, motivo, start, end, created_by_name, created_by_email, created_at
-       FROM agendamentos_portaria ORDER BY start ASC`
-    );
-    res.json(rows);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+    res.json({ ok: true, ranking });
+  } catch (error) {
+    console.error('Erro ao buscar ranking:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar ranking' });
   }
 });
 
 // -------------------------------------------------------------
-// Trocas de Proteína (+5) + Exportações
+// Mural routes
 // -------------------------------------------------------------
-app.post('/api/trocas-proteina', async (req, res) => {
+app.get('/api/mural/posts', async (req, res) => {
   try {
-    const { data, proteina_original, proteina_nova } = req.body;
-    if (!data || !proteina_original || !proteina_nova) {
-      return res.status(400).json({ ok: false, error: 'Campos: data, proteina_original, proteina_nova' });
-    }
-    const exists = await get(
-      `SELECT id FROM trocas_proteina WHERE email = ? AND date(data) = date(?)`,
-      [req.user.email, data]
-    );
-    if (exists) {
-      return res.status(400).json({ ok: false, error: 'Troca já registrada para esta data' });
-    }
-    const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
-    const info = await run(
-      `INSERT INTO trocas_proteina (data, dia, proteina_original, proteina_nova, email, nome)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [data, dia, proteina_original, proteina_nova, req.user.email, req.user.name]
-    );
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'troca_proteina', pontos: 5, refTable: 'trocas_proteina', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
-  } catch (e) {
-    console.error('POST /api/trocas-proteina', e);
-    res.status(500).json({ ok: false, error: 'Erro ao salvar troca de proteína' });
+    const posts = await all(`
+      SELECT p.*, 
+        (SELECT COUNT(*) FROM mural_likes l WHERE l.post_id = p.id) as likes_count,
+        (SELECT COUNT(*) FROM mural_comments c WHERE c.post_id = p.id) as comments_count
+      FROM mural_posts p
+      ORDER BY p.pinned DESC, p.created_at DESC
+    `);
+    
+    res.json({ ok: true, posts });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: 'Erro ao buscar posts' });
   }
 });
 
-app.get('/api/trocas-proteina', async (req, res) => {
+app.post('/api/mural/:id/like', authMiddleware, async (req, res) => {
   try {
-    const { from, to } = req.query;
-    let sql = `SELECT * FROM trocas_proteina WHERE email = ?`;
-    const params = [req.user.email];
-    if (from && to) {
-      sql += ` AND date(data) BETWEEN date(?) AND date(?)`;
-      params.push(from, to);
+    const postId = req.params.id;
+    
+    // Check if already liked
+    const existing = await get("SELECT * FROM mural_likes WHERE post_id = ? AND user_id = ?", [postId, req.userId]);
+    
+    if (existing) {
+      // Remove like
+      await run("DELETE FROM mural_likes WHERE post_id = ? AND user_id = ?", [postId, req.userId]);
+      res.json({ ok: true, action: 'unliked' });
+    } else {
+      // Add like
+      await run("INSERT INTO mural_likes(post_id, user_id) VALUES(?, ?)", [postId, req.userId]);
+      await registrarPontos(req.userId, 'MURAL_LIKE', POINTS.MURAL_LIKE, { post_id: postId });
+      res.json({ ok: true, action: 'liked', points: POINTS.MURAL_LIKE });
     }
-    sql += ` ORDER BY date(data) ASC`;
-    const rows = await all(sql, params);
-    res.json(rows);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
+  } catch (error) {
+    console.error('Erro ao processar like:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao processar like' });
   }
 });
 
-app.get('/admin/exportar-trocas', async (req, res) => {
+app.post('/api/mural/:id/comments', authMiddleware, async (req, res) => {
   try {
-    if (!['TI', 'RH'].includes(req.user.sector)) {
-      return res.status(403).json({ ok: false, error: 'Sem permissão' });
+    const postId = req.params.id;
+    const { texto } = req.body;
+    
+    if (!texto?.trim()) {
+      return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
     }
-
-    const { formato = 'xlsx', from, to, q } = req.query;
-    let sql =
-      `SELECT nome, email, data, proteina_original, proteina_nova, created_at FROM trocas_proteina`;
-    const params = [];
-    const conds = [];
-
-    if (from && to) {
-      conds.push(`date(data) BETWEEN date(?) AND date(?)`);
-      params.push(from, to);
-    }
-    if (q) {
-      conds.push(`(LOWER(nome) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?))`);
-      params.push(`%${q}%`, `%${q}%`);
-    }
-    if (conds.length) sql += ` WHERE ` + conds.join(' AND ');
-    sql += ` ORDER BY date(data) ASC, nome ASC`;
-    const rows = await all(sql, params);
-
-    const cols = [
-      'Nome do usuário',
-      'E-mail',
-      'Dia da troca',
-      'Proteína original',
-      'Nova proteína',
-      'Data da solicitação',
-    ];
-
-    switch (String(formato).toLowerCase()) {
-      case 'csv': {
-        let csv = cols.join(';') + '\n';
-        rows.forEach(r => {
-          csv +=
-            [
-              r.nome,
-              r.email,
-              r.data,
-              r.proteina_original,
-              r.proteina_nova,
-              r.created_at,
-            ].join(';') + '\n';
-        });
-        res.setHeader('Content-Type', 'text/csv');
-        res.setHeader('Content-Disposition', `attachment; filename="trocas_proteina.csv"`);
-        return res.send(csv);
-      }
-      case 'pdf': {
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="trocas_proteina.pdf"`);
-        const doc = new PDFDocument({ margin: 36 });
-        doc.pipe(res);
-        doc.fontSize(16).text('Relatório - Trocas de Proteína', { align: 'center' });
-        doc.moveDown();
-        rows.forEach(r => {
-          doc
-            .fontSize(11)
-            .text(
-              `${r.nome} <${r.email}> | Dia: ${r.data} | ${r.proteina_original} -> ${r.proteina_nova} | Solicitação: ${r.created_at}`
-            );
-          doc.moveDown(0.2);
-        });
-        doc.end();
-        return;
-      }
-      default: {
-        const wb = new ExcelJS.Workbook();
-        const ws = wb.addWorksheet('Trocas de Proteína');
-        ws.addRow(cols);
-        rows.forEach(r =>
-          ws.addRow([
-            r.nome,
-            r.email,
-            r.data,
-            r.proteina_original,
-            r.proteina_nova,
-            r.created_at,
-          ])
-        );
-        res.setHeader(
-          'Content-Type',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        );
-        res.setHeader(
-          'Content-Disposition',
-          `attachment; filename="trocas_proteina.xlsx"`
-        );
-        await wb.xlsx.write(res);
-        return res.end();
-      }
-    }
-  } catch (e) {
-    console.error('GET /admin/exportar-trocas', e);
-    res.status(500).json({ ok: false, error: 'Erro ao gerar arquivo' });
-  }
-});
-
-// -------------------------------------------------------------
-// Mural: Comentários (+5) e Reações/curtidas (+5)
-// -------------------------------------------------------------
-app.get('/api/mural-posts', async (req, res) => {
-  try {
-    const posts = await all(
-      `SELECT id, usuario_nome, usuario_email, conteudo, imagem_url, created_at
-       FROM mural_posts ORDER BY created_at DESC`
+    
+    const result = await run(
+      "INSERT INTO mural_comments(post_id, user_id, texto) VALUES(?, ?, ?)",
+      [postId, req.userId, texto.trim()]
     );
     
-    for (let post of posts) {
-      const comentarios = await all(
-        `SELECT id, usuario_nome, usuario_email, conteudo, created_at
-         FROM mural_comentarios WHERE post_id = ? ORDER BY created_at ASC`,
-        [post.id]
-      );
-      
-      const reacoes = await all(
-        `SELECT tipo, COUNT(*) as count
-         FROM mural_reacoes WHERE post_id = ? GROUP BY tipo`,
-        [post.id]
-      );
-      
-      post.comentarios = comentarios;
-      post.reacoes = reacoes.reduce((acc, r) => {
-        acc[r.tipo] = r.count;
-        return acc;
-      }, {});
-    }
+    await registrarPontos(req.userId, 'MURAL_COMMENT', POINTS.MURAL_COMMENT, { post_id: postId });
     
-    res.json(posts);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.post('/api/mural-posts', async (req, res) => {
-  try {
-    const { conteudo, imagem_url } = req.body;
-    if (!conteudo) {
-      return res.status(400).json({ ok: false, error: 'Conteúdo obrigatório' });
-    }
-    
-    const info = await run(
-      `INSERT INTO mural_posts (usuario_email, usuario_nome, conteudo, imagem_url)
-       VALUES (?, ?, ?, ?)`,
-      [req.user.email, req.user.name, conteudo, imagem_url]
-    );
-    
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'post_mural', pontos: 10, refTable: 'mural_posts', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
-  } catch (e) {
-    console.error('POST /api/mural-posts', e);
-    res.status(500).json({ ok: false, error: 'Erro ao criar post' });
-  }
-});
-
-app.post('/api/mural-comentarios', async (req, res) => {
-  try {
-    const { post_id, conteudo } = req.body;
-    if (!post_id || !conteudo) {
-      return res.status(400).json({ ok: false, error: 'post_id e conteúdo obrigatórios' });
-    }
-    
-    const info = await run(
-      `INSERT INTO mural_comentarios (post_id, usuario_email, usuario_nome, conteudo)
-       VALUES (?, ?, ?, ?)`,
-      [post_id, req.user.email, req.user.name, conteudo]
-    );
-    
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'comentario_mural', pontos: 5, refTable: 'mural_comentarios', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
-  } catch (e) {
-    console.error('POST /api/mural-comentarios', e);
+    res.json({ ok: true, id: result.lastID, points: POINTS.MURAL_COMMENT });
+  } catch (error) {
+    console.error('Erro ao criar comentário:', error);
     res.status(500).json({ ok: false, error: 'Erro ao criar comentário' });
   }
 });
 
-app.post('/api/mural-reacoes', async (req, res) => {
+// -------------------------------------------------------------
+// Reservations routes
+// -------------------------------------------------------------
+app.post('/api/reservas', authMiddleware, async (req, res) => {
   try {
-    const { post_id, tipo } = req.body;
-    if (!post_id || !tipo) {
-      return res.status(400).json({ ok: false, error: 'post_id e tipo obrigatórios' });
+    const { sala, data, inicio, fim, assunto } = req.body;
+    
+    if (!sala || !data || !inicio || !fim || !assunto) {
+      return res.status(400).json({ ok: false, error: 'Todos os campos são obrigatórios' });
     }
     
-    const existing = await get(
-      `SELECT id FROM mural_reacoes WHERE post_id = ? AND usuario_email = ? AND tipo = ?`,
-      [post_id, req.user.email, tipo]
+    // Check for conflicts
+    const conflict = await get(`
+      SELECT * FROM reservas 
+      WHERE sala = ? AND data = ? 
+      AND ((inicio <= ? AND fim > ?) OR (inicio < ? AND fim >= ?))
+    `, [sala, data, inicio, inicio, fim, fim]);
+    
+    if (conflict) {
+      return res.status(400).json({ ok: false, error: 'Conflito de horário para esta sala' });
+    }
+    
+    const result = await run(
+      "INSERT INTO reservas(sala, data, inicio, fim, assunto, user_id) VALUES(?, ?, ?, ?, ?, ?)",
+      [sala, data, inicio, fim, assunto, req.userId]
     );
     
-    if (existing) {
-      await run(
-        `DELETE FROM mural_reacoes WHERE id = ?`,
-        [existing.id]
-      );
-      res.json({ ok: true, action: 'removed' });
-    } else {
-      const info = await run(
-        `INSERT INTO mural_reacoes (post_id, usuario_email, usuario_nome, tipo)
-         VALUES (?, ?, ?, ?)`,
-        [post_id, req.user.email, req.user.name, tipo]
+    await registrarPontos(req.userId, 'RESERVA_CREATE', POINTS.RESERVA_CREATE, { sala, data });
+    
+    res.json({ ok: true, id: result.lastID, points: POINTS.RESERVA_CREATE });
+  } catch (error) {
+    console.error('Erro ao criar reserva:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao criar reserva' });
+  }
+});
+
+// -------------------------------------------------------------
+// Reception appointments routes
+// -------------------------------------------------------------
+app.post('/api/portaria/agendamentos', authMiddleware, async (req, res) => {
+  try {
+    const { data, hora, visitante, documento, observacao } = req.body;
+    
+    if (!data || !hora || !visitante) {
+      return res.status(400).json({ ok: false, error: 'Data, hora e visitante são obrigatórios' });
+    }
+    
+    const result = await run(
+      "INSERT INTO portaria_agendamentos(data, hora, visitante, documento, observacao, user_id) VALUES(?, ?, ?, ?, ?, ?)",
+      [data, hora, visitante, documento, observacao, req.userId]
+    );
+    
+    await registrarPontos(req.userId, 'PORTARIA_CREATE', POINTS.PORTARIA_CREATE, { data, visitante });
+    
+    res.json({ ok: true, id: result.lastID, points: POINTS.PORTARIA_CREATE });
+  } catch (error) {
+    console.error('Erro ao criar agendamento:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao criar agendamento' });
+  }
+});
+
+// -------------------------------------------------------------
+// Protein exchange routes
+// -------------------------------------------------------------
+app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
+  try {
+    const { trocas } = req.body;
+    
+    if (!Array.isArray(trocas) || trocas.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Lista de trocas é obrigatória' });
+    }
+    
+    let inseridas = 0;
+    
+    for (const troca of trocas) {
+      const { data, proteina_original, proteina_nova } = troca;
+      
+      if (!data || !proteina_nova || proteina_nova === proteina_original) {
+        continue;
+      }
+      
+      // Check if already exists for this user and date
+      const existing = await get(
+        "SELECT * FROM trocas_proteina WHERE user_id = ? AND data = ?",
+        [req.userId, data]
       );
       
-      await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'reacao_mural', pontos: 5, refTable: 'mural_reacoes', refId: info.lastID });
-      res.json({ ok: true, action: 'added', id: info.lastID });
+      if (!existing) {
+        const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
+        
+        await run(
+          "INSERT INTO trocas_proteina(data, dia, proteina_original, proteina_nova, user_id) VALUES(?, ?, ?, ?, ?)",
+          [data, dia, proteina_original, proteina_nova, req.userId]
+        );
+        
+        await registrarPontos(req.userId, 'TROCA_PROTEINA', POINTS.TROCA_PROTEINA, { data });
+        inseridas++;
+      }
     }
-  } catch (e) {
-    console.error('POST /api/mural-reacoes', e);
-    res.status(500).json({ ok: false, error: 'Erro ao processar reação' });
+    
+    const totalPoints = inseridas * POINTS.TROCA_PROTEINA;
+    res.json({ ok: true, inseridas, totalPoints });
+  } catch (error) {
+    console.error('Erro ao processar trocas:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao processar trocas' });
+  }
+});
+
+// Get user's protein exchanges
+app.get('/api/trocas-proteina', authMiddleware, async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let sql = "SELECT * FROM trocas_proteina WHERE user_id = ?";
+    const params = [req.userId];
+    
+    if (from && to) {
+      sql += " AND date(data) BETWEEN date(?) AND date(?)";
+      params.push(from, to);
+    }
+    
+    sql += " ORDER BY date(data) ASC";
+    const trocas = await all(sql, params);
+    
+    res.json({ ok: true, trocas });
+  } catch (error) {
+    console.error('Erro ao buscar trocas:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar trocas' });
   }
 });
 
 // -------------------------------------------------------------
-// Solicitações de TI (+15 pontos)
-// -------------------------------------------------------------
-app.post('/api/solicitacoes-ti', async (req, res) => {
-  try {
-    const { equipamento, descricao } = req.body;
-    if (!equipamento) {
-      return res.status(400).json({ ok: false, error: 'Equipamento obrigatório' });
-    }
-    
-    const info = await run(
-      `INSERT INTO solicitacoes_ti (usuario_email, usuario_nome, equipamento, descricao)
-       VALUES (?, ?, ?, ?)`,
-      [req.user.email, req.user.name, equipamento, descricao]
-    );
-    
-    await registrarPontos({ email: req.user.email, nome: req.user.name, acao: 'solicitacao_ti', pontos: 15, refTable: 'solicitacoes_ti', refId: info.lastID });
-    res.json({ ok: true, id: info.lastID });
-  } catch (e) {
-    console.error('POST /api/solicitacoes-ti', e);
-    res.status(500).json({ ok: false, error: 'Erro ao criar solicitação' });
-  }
-});
-
-app.get('/api/solicitacoes-ti', async (req, res) => {
-  try {
-    let sql = `SELECT * FROM solicitacoes_ti`;
-    const params = [];
-    
-    if (req.user.sector !== 'TI') {
-      sql += ` WHERE usuario_email = ?`;
-      params.push(req.user.email);
-    }
-    
-    sql += ` ORDER BY created_at DESC`;
-    const rows = await all(sql, params);
-    res.json(rows);
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
-
-app.put('/api/solicitacoes-ti/:id', async (req, res) => {
-  try {
-    if (req.user.sector !== 'TI') {
-      return res.status(403).json({ ok: false, error: 'Sem permissão' });
-    }
-    
-    const { status } = req.body;
-    if (!status) {
-      return res.status(400).json({ ok: false, error: 'Status obrigatório' });
-    }
-    
-    await run(
-      `UPDATE solicitacoes_ti SET status = ? WHERE id = ?`,
-      [status, req.params.id]
-    );
-    
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('PUT /api/solicitacoes-ti/:id', e);
-    res.status(500).json({ ok: false, error: 'Erro ao atualizar status' });
-  }
-});
-
-// -------------------------------------------------------------
-// Inicialização do servidor
+// Server startup
 // -------------------------------------------------------------
 app.listen(PORT, () => {
   console.log(`Servidor rodando na porta ${PORT}`);
+  console.log(`Frontend URL: ${FRONTEND_URL}`);
+  console.log(`Google OAuth configurado: ${!!GOOGLE_CLIENT_ID}`);
 });

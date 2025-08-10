@@ -3,101 +3,59 @@ import { Layout } from '../components/Layout';
 import { Search, Phone, Mail, MapPin, Building } from 'lucide-react';
 import { useGamification } from '../contexts/GamificationContext';
 
+const API_BASE = 'http://localhost:3001';
+
 interface Employee {
   id: string;
-  name: string;
-  position: string;
-  department: string;
+  nome: string;
+  cargo: string;
+  setor: string;
   email: string;
-  phone: string;
-  city: string;
-  extension?: string;
-  avatar: string;
+  telefone: string;
+  cidade: string;
+  ramal?: string;
 }
 
 export const Diretorio: React.FC = () => {
-  const { addActivity } = useGamification();
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDepartment, setSelectedDepartment] = useState('');
-  const [selectedCity, setSelectedCity] = useState('');
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // Track directory access
-  React.useEffect(() => {
-    addActivity('page_visit', 'Acessou o diretório corporativo');
+  useEffect(() => {
+    loadContacts();
   }, []);
 
-  const employees: Employee[] = [
-    {
-      id: '1',
-      name: 'João Silva',
-      position: 'Gerente de Vendas',
-      department: 'Vendas',
-      email: 'joao.silva@grupocropfield.com.br',
-      phone: '(11) 99999-1234',
-      city: 'São Paulo',
-      extension: '1001',
-      avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150',
-    },
-    {
-      id: '2',
-      name: 'Maria Santos',
-      position: 'Analista de RH',
-      department: 'RH',
-      email: 'maria.santos@grupocropfield.com.br',
-      phone: '(11) 99999-5678',
-      city: 'São Paulo',
-      extension: '1002',
-      avatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=150',
-    },
-    {
-      id: '3',
-      name: 'Carlos Oliveira',
-      position: 'Desenvolvedor Senior',
-      department: 'TI',
-      email: 'carlos.oliveira@grupocropfield.com.br',
-      phone: '(11) 99999-9012',
-      city: 'São Paulo',
-      extension: '1003',
-      avatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?w=150',
-    },
-    {
-      id: '4',
-      name: 'Ana Costa',
-      position: 'Contadora',
-      department: 'Financeiro',
-      email: 'ana.costa@grupocropfield.com.br',
-      phone: '(11) 99999-3456',
-      city: 'Rio de Janeiro',
-      avatar: 'https://images.pexels.com/photos/1130626/pexels-photo-1130626.jpeg?w=150',
-    },
-    {
-      id: '5',
-      name: 'Roberto Lima',
-      position: 'Supervisor de Produção',
-      department: 'Produção',
-      email: 'roberto.lima@grupocropfield.com.br',
-      phone: '(11) 99999-7890',
-      city: 'Belo Horizonte',
-      extension: '2001',
-      avatar: 'https://images.pexels.com/photos/1024311/pexels-photo-1024311.jpeg?w=150',
+  const loadContacts = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/contatos?q=${searchTerm}`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setEmployees(data);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar contatos:', error);
+    } finally {
+      setLoading(false);
     }
-  ];
+  };
 
-  const departments = Array.from(new Set(employees.map(emp => emp.department))).sort();
-  const cities = Array.from(new Set(employees.map(emp => emp.city))).sort();
+  // Reload contacts when search term changes
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      loadContacts();
+    }, 300);
+    
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
 
-  const filteredEmployees = employees.filter(employee => {
-    const matchesSearch = employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         employee.position.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         employee.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesDepartment = selectedDepartment === '' || employee.department === selectedDepartment;
-    const matchesCity = selectedCity === '' || employee.city === selectedCity;
+  const departments = Array.from(new Set(employees.map(emp => emp.setor))).sort();
+  const cities = Array.from(new Set(employees.map(emp => emp.cidade))).sort();
 
-    return matchesSearch && matchesDepartment && matchesCity;
-  });
-
-  const groupedEmployees = filteredEmployees.reduce((groups, employee) => {
-    const dept = employee.department;
+  const groupedEmployees = employees.reduce((groups, employee) => {
+    const dept = employee.setor;
     if (!groups[dept]) {
       groups[dept] = [];
     }
@@ -111,13 +69,13 @@ export const Diretorio: React.FC = () => {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Diretório Corporativo</h1>
           <div className="text-sm text-gray-600">
-            {filteredEmployees.length} colaboradores encontrados
+            {employees.length} colaboradores encontrados
           </div>
         </div>
 
         {/* Filters */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Pesquisar
@@ -133,43 +91,18 @@ export const Diretorio: React.FC = () => {
                 />
               </div>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Departamento
-              </label>
-              <select
-                value={selectedDepartment}
-                onChange={(e) => setSelectedDepartment(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Todos os departamentos</option>
-                {departments.map(dept => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Cidade
-              </label>
-              <select
-                value={selectedCity}
-                onChange={(e) => setSelectedCity(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Todas as cidades</option>
-                {cities.map(city => (
-                  <option key={city} value={city}>{city}</option>
-                ))}
-              </select>
-            </div>
           </div>
         </div>
 
+        {loading && (
+          <div className="flex items-center justify-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+          </div>
+        )}
+
         {/* Employee Directory */}
-        <div className="space-y-8">
+        {!loading && (
+          <div className="space-y-8">
           {Object.entries(groupedEmployees).map(([department, departmentEmployees]) => (
             <div key={department} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
               <div className="flex items-center space-x-3 mb-6">
@@ -185,13 +118,13 @@ export const Diretorio: React.FC = () => {
                   <div key={employee.id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
                     <div className="flex items-start space-x-4">
                       <img
-                        src={employee.avatar}
-                        alt={employee.name}
+                        src="https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150"
+                        alt={employee.nome}
                         className="w-12 h-12 rounded-full object-cover"
                       />
                       <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-gray-900 truncate">{employee.name}</h3>
-                        <p className="text-sm text-gray-600 truncate">{employee.position}</p>
+                        <h3 className="font-semibold text-gray-900 truncate">{employee.nome}</h3>
+                        <p className="text-sm text-gray-600 truncate">{employee.cargo}</p>
                         
                         <div className="mt-3 space-y-2">
                           <div className="flex items-center space-x-2">
@@ -206,15 +139,15 @@ export const Diretorio: React.FC = () => {
                           
                           <div className="flex items-center space-x-2">
                             <Phone className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-600">{employee.phone}</span>
-                            {employee.extension && (
-                              <span className="text-xs text-gray-500">({employee.extension})</span>
+                            <span className="text-sm text-gray-600">{employee.telefone}</span>
+                            {employee.ramal && (
+                              <span className="text-xs text-gray-500">({employee.ramal})</span>
                             )}
                           </div>
                           
                           <div className="flex items-center space-x-2">
                             <MapPin className="w-4 h-4 text-gray-400" />
-                            <span className="text-sm text-gray-600">{employee.city}</span>
+                            <span className="text-sm text-gray-600">{employee.cidade}</span>
                           </div>
                         </div>
                       </div>
@@ -225,8 +158,9 @@ export const Diretorio: React.FC = () => {
             </div>
           ))}
         </div>
+        )}
 
-        {filteredEmployees.length === 0 && (
+        {!loading && employees.length === 0 && (
           <div className="text-center py-12">
             <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <Search className="w-8 h-8 text-gray-400" />

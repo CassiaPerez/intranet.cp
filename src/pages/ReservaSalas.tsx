@@ -6,7 +6,9 @@ import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import toast from 'react-hot-toast';
-import { useGamification } from '../contexts/GamificationContext';
+import { useAuth } from '../contexts/AuthContext';
+
+const API_BASE = 'http://localhost:3001';
 
 const salas = [
   { id: 'aquario', name: 'Sala Aquário', capacity: 8, color: '#3B82F6' },
@@ -16,7 +18,7 @@ const salas = [
 ];
 
 export const ReservaSalas: React.FC = () => {
-  const { addActivity } = useGamification();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<'salas' | 'portaria'>('salas');
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -64,28 +66,48 @@ export const ReservaSalas: React.FC = () => {
     setShowReservationModal(true);
   };
 
-  const handleReservation = (e: React.FormEvent) => {
+  const handleReservation = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Aqui seria feita a integração com Google Calendar e banco de dados
     
-    // Add gamification activity
-    const salaName = salas.find(s => s.id === reservationData.sala)?.name || reservationData.sala;
-    addActivity('room_reservation', `Reservou ${salaName} - ${reservationData.motivo}`, {
-      sala: reservationData.sala,
-      motivo: reservationData.motivo,
-      inicio: reservationData.inicio,
-      fim: reservationData.fim,
-    });
-    
-    toast.success('Reserva realizada com sucesso!');
-    setShowReservationModal(false);
-    setReservationData({
-      sala: '',
-      motivo: '',
-      descricao: '',
-      inicio: '',
-      fim: '',
-    });
+    try {
+      const response = await fetch(`${API_BASE}/api/reservas`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          sala: reservationData.sala,
+          data: reservationData.inicio.split('T')[0],
+          inicio: reservationData.inicio.split('T')[1],
+          fim: reservationData.fim.split('T')[1],
+          assunto: reservationData.motivo
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.points) {
+          toast.success(`Reserva realizada com sucesso! +${data.points} pontos`);
+        } else {
+          toast.success('Reserva realizada com sucesso!');
+        }
+        setShowReservationModal(false);
+        setReservationData({
+          sala: '',
+          motivo: '',
+          descricao: '',
+          inicio: '',
+          fim: '',
+        });
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao criar reserva');
+      }
+    } catch (error) {
+      console.error('Erro ao criar reserva:', error);
+      toast.error('Erro ao criar reserva');
+    }
   };
 
   return (

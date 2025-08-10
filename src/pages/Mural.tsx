@@ -5,7 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import toast from 'react-hot-toast';
-import { useGamification } from '../contexts/GamificationContext';
+
+const API_BASE = 'http://localhost:3001';
 
 interface Reaction {
   type: 'like' | 'love';
@@ -34,8 +35,7 @@ interface Post {
 }
 
 export const Mural: React.FC = () => {
-  const { user, isAdmin } = useAuth();
-  const { addActivity } = useGamification();
+  const { user } = useAuth();
   const [showNewPostModal, setShowNewPostModal] = useState(false);
   const [newPost, setNewPost] = useState({
     title: '',
@@ -81,7 +81,7 @@ export const Mural: React.FC = () => {
     },
   ]);
 
-  const canPost = isAdmin || user?.sector === 'TI' || user?.sector === 'RH';
+  const canPost = user?.setor === 'TI' || user?.setor === 'RH';
 
   const handleCreatePost = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,9 +95,9 @@ export const Mural: React.FC = () => {
       id: Date.now().toString(),
       title: newPost.title,
       content: newPost.content,
-      author: user?.name || 'Usuário',
+      author: user?.nome || 'Usuário',
       authorId: user?.id || '0',
-      authorSector: user?.sector || '',
+      authorSector: user?.setor || '',
       date: new Date(),
       reactions: [],
       comments: [],
@@ -106,90 +106,59 @@ export const Mural: React.FC = () => {
     setPosts(prev => [post, ...prev]);
     setNewPost({ title: '', content: '' });
     setShowNewPostModal(false);
-    
-    // Add gamification activity
-    addActivity('post_creation', `Criou publicação: ${newPost.title}`, {
-      title: newPost.title,
-      content: newPost.content,
-    });
-    
     toast.success('Publicação criada com sucesso!');
   };
 
-  const handleReaction = (postId: string, reactionType: 'like' | 'love') => {
-    const post = posts.find(p => p.id === postId);
-    const existingReaction = post?.reactions.find(r => r.userId === user?.id);
-    
-    setPosts(prev => prev.map(post => {
-      if (post.id === postId) {
-        const existingReactionIndex = post.reactions.findIndex(r => r.userId === user?.id);
-        const newReactions = [...post.reactions];
-        
-        if (existingReactionIndex >= 0) {
-          if (newReactions[existingReactionIndex].type === reactionType) {
-            // Remove reaction if same type
-            newReactions.splice(existingReactionIndex, 1);
-          } else {
-            // Update reaction type
-            newReactions[existingReactionIndex].type = reactionType;
-            // Add gamification activity for reaction change
-            addActivity('reaction', `Reagiu ${reactionType === 'like' ? '👍' : '❤️'} à publicação: ${post.title}`, {
-              postId,
-              postTitle: post.title,
-              reactionType,
-            });
-          }
-        } else {
-          // Add new reaction
-          newReactions.push({
-            type: reactionType,
-            userId: user?.id || '0',
-            userName: user?.name || 'Usuário',
-          });
-          // Add gamification activity for new reaction
-          addActivity('reaction', `Reagiu ${reactionType === 'like' ? '👍' : '❤️'} à publicação: ${post.title}`, {
-            postId,
-            postTitle: post.title,
-            reactionType,
-          });
+  const handleReaction = async (postId: string, reactionType: 'like' | 'love') => {
+    try {
+      const response = await fetch(`${API_BASE}/api/mural/${postId}/like`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.points) {
+          toast.success(`+${data.points} pontos! ${data.action === 'liked' ? 'Curtiu' : 'Descurtiu'} a publicação`);
         }
-        
-        return { ...post, reactions: newReactions };
+        // Update local state here if needed
+      } else {
+        toast.error('Erro ao processar reação');
       }
-      return post;
-    }));
+    } catch (error) {
+      console.error('Erro ao processar reação:', error);
+      toast.error('Erro ao processar reação');
+    }
   };
 
-  const handleComment = (postId: string) => {
+  const handleComment = async (postId: string) => {
     const commentText = commentTexts[postId];
     if (!commentText?.trim()) return;
 
-    const post = posts.find(p => p.id === postId);
-    const newComment: Comment = {
-      id: Date.now().toString(),
-      text: commentText,
-      author: user?.name || 'Usuário',
-      authorId: user?.id || '0',
-      date: new Date(),
-    };
-
-    setPosts(prev => prev.map(post => {
-      if (post.id === postId) {
-        return { ...post, comments: [...post.comments, newComment] };
+    try {
+      const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify({ texto: commentText })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.points) {
+          toast.success(`+${data.points} pontos! Comentário adicionado`);
+        }
+        setCommentTexts(prev => ({ ...prev, [postId]: '' }));
+        // Update local state here if needed
+      } else {
+        toast.error('Erro ao adicionar comentário');
       }
-      return post;
-    }));
-
-    setCommentTexts(prev => ({ ...prev, [postId]: '' }));
-    
-    // Add gamification activity
-    addActivity('comment', `Comentou na publicação: ${post?.title}`, {
-      postId,
-      postTitle: post?.title,
-      commentText,
-    });
-    
-    toast.success('Comentário adicionado!');
+    } catch (error) {
+      console.error('Erro ao adicionar comentário:', error);
+      toast.error('Erro ao adicionar comentário');
+    }
   };
 
   const getUserReaction = (post: Post) => {
