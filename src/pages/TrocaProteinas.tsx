@@ -1,290 +1,259 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { Calendar, Clock, Utensils, Save, AlertCircle } from 'lucide-react';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from '../contexts/AuthContext';
 
-interface TrocaProteina {
-  id: number;
-  data: string;
-  dia: string;
-  proteina_original: string;
-  proteina_nova: string;
-  email: string;
-  nome: string;
-  created_at: string;
-}
+type CardapioItem = {
+  id?: string;
+  dia?: string;
+  data: string;        // dd/MM/yyyy
+  prato?: string;
+  descricao?: string;
+  proteina: string;
+  acompanhamentos?: string[];
+  sobremesa?: string;
+};
 
-const proteinasDisponiveis = [
-  'Frango',
-  'Carne Bovina',
-  'Peixe',
-  'Porco',
-  'Ovo',
-  'Vegetariana',
-  'Vegana'
-];
+type Troca = {
+  data: string;                 // ISO 'yyyy-MM-dd'
+  proteina_original: string;    // do cardápio padrão (pode estar vazio se não houver cardápio no dia)
+  proteina_nova?: string;
+};
 
-export function TrocaProteinas() {
-  const [trocas, setTrocas] = useState<TrocaProteina[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [formData, setFormData] = useState({
-    data: '',
-    proteina_original: '',
-    proteina_nova: ''
-  });
-  const [submitting, setSubmitting] = useState(false);
+const TrocaProteinas: React.FC = () => {
+  const { user } = useAuth();
+  const hoje = new Date();
+  const ano = hoje.getFullYear();
+  const mes = hoje.getMonth() + 1;
 
+  const [cardapioPadrao, setCardapioPadrao] = useState<CardapioItem[]>([]);
+  const [cardapioLight, setCardapioLight] = useState<CardapioItem[]>([]);
+  const [trocas, setTrocas] = useState<Record<string, Troca>>({}); // key=data ISO
+  const [applyAllProtein, setApplyAllProtein] = useState<string>("");
+
+  // Carrega cardápio (padrão + light) do mês e trocas já salvas
   useEffect(() => {
-    carregarTrocas();
+    (async () => {
+      try {
+        const [padrao, light] = await Promise.all([
+          fetch(`/api/cardapio?ano=${ano}&mes=${mes}&tipo=padrao`, { headers: authHeader() }).then(r => r.json()),
+          fetch(`/api/cardapio?ano=${ano}&mes=${mes}&tipo=light`, { headers: authHeader() }).then(r => r.json()),
+        ]);
+        setCardapioPadrao(Array.isArray(padrao) ? padrao : []);
+        setCardapioLight(Array.isArray(light) ? light : []);
+
+        // Carregar trocas existentes no mês (seu backend já expõe esse GET)
+        const from = format(startOfMonth(hoje), 'yyyy-MM-01');
+        const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
+        const prev = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { headers: authHeader() }).then(r => r.json());
+        if (Array.isArray(prev)) {
+          const map: Record<string, Troca> = {};
+          for (const t of prev) {
+            const dataISO = format(new Date(t.data), 'yyyy-MM-dd');
+            map[dataISO] = { data: dataISO, proteina_original: t.proteina_original || "", proteina_nova: t.proteina_nova };
+          }
+          setTrocas(map);
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error('Falha ao carregar dados do cardápio.');
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const carregarTrocas = async () => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/trocas-proteina', {
-        headers: {
-          'Authorization': `Bearer ${token}`
+  // Todos os dias do mês (sempre)
+  const diasDoMes = useMemo(() => {
+    return eachDayOfInterval({ start: startOfMonth(hoje), end: endOfMonth(hoje) });
+  }, [hoje]);
+
+  // Mapa dataISO -> proteína original (vinda do cardápio padrão)
+  const originalByDate = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const it of cardapioPadrao) {
+      const [dd, mm, yyyy] = (it.data || '').split('/');
+      if (dd && mm && yyyy) {
+        const iso = `${yyyy}-${mm}-${dd}`;
+        map[iso] = it.proteina || '';
+      }
+    }
+    return map;
+  }, [cardapioPadrao]);
+
+  // Opções = união das proteínas que aparecem no mês (padrão + light)
+  const opcoesProteina = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of cardapioPadrao) if (a.proteina) set.add(a.proteina);
+    for (const b of cardapioLight) if (b.proteina) set.add(b.proteina);
+    return Array.from(set).sort((a,b) => a.localeCompare(b, 'pt-BR'));
+  }, [cardapioPadrao, cardapioLight]);
+
+  // Alterar uma linha
+  const handleChange = (dataISO: string, nova: string) => {
+    const original = originalByDate[dataISO] || ''; // vazio se não houver cardápio naquele dia
+    // Se igual à original (ou vazio), limpamos (não enviaremos essa linha)
+    if (!nova || nova === original) {
+      setTrocas(prev => {
+        const copy = { ...prev };
+        delete copy[dataISO];
+        return copy;
+      });
+      return;
+    }
+    setTrocas(prev => ({ ...prev, [dataISO]: { data: dataISO, proteina_original: original, proteina_nova: nova } }));
+  };
+
+  // Aplicar para todos os dias disponíveis (com cardápio)
+  const aplicarParaTodos = () => {
+    const target = applyAllProtein.trim();
+    if (!target) {
+      toast('Escolha a proteína para aplicar em todos os dias.');
+      return;
+    }
+    if (opcoesProteina.length && !opcoesProteina.includes(target)) {
+      toast.error('Proteína inválida para este mês.');
+      return;
+    }
+    setTrocas(prev => {
+      const copy = { ...prev };
+      for (const d of diasDoMes) {
+        const iso = format(d, 'yyyy-MM-dd');
+        const original = originalByDate[iso] || '';
+        // Só aplicamos nos dias que têm cardápio (original não vazio) e quando a troca muda algo
+        if (original && target !== original) {
+          copy[iso] = { data: iso, proteina_original: original, proteina_nova: target };
+        } else {
+          // se não houver cardápio neste dia ou não muda nada, não mantemos troca
+          delete copy[iso];
         }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setTrocas(data);
       }
-    } catch (error) {
-      console.error('Erro ao carregar trocas:', error);
-      toast.error('Erro ao carregar histórico de trocas');
-    } finally {
-      setLoading(false);
-    }
+      return copy;
+    });
+    toast.success('Aplicado a todos os dias disponíveis do mês.');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.data || !formData.proteina_original || !formData.proteina_nova) {
-      toast.error('Todos os campos são obrigatórios');
+  // Salvar em lote
+  const salvar = async () => {
+    const payload = Object.values(trocas).filter(t => t.proteina_nova && t.proteina_nova !== t.proteina_original && t.proteina_original);
+    if (payload.length === 0) {
+      toast('Nenhuma troca para salvar.');
       return;
     }
-
-    if (formData.proteina_original === formData.proteina_nova) {
-      toast.error('A proteína original deve ser diferente da nova proteína');
-      return;
-    }
-
-    setSubmitting(true);
-    
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch('/api/trocas-proteina', {
+      const res = await fetch(`/api/trocas-proteina/bulk?ano=${ano}&mes=${mes}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(formData)
+        headers: { 'Content-Type': 'application/json', ...authHeader() },
+        body: JSON.stringify({ trocas: payload }),
       });
-
-      const result = await response.json();
-      
-      if (response.ok) {
-        toast.success('Troca de proteína registrada com sucesso! (+5 pontos)');
-        setFormData({
-          data: '',
-          proteina_original: '',
-          proteina_nova: ''
-        });
-        carregarTrocas();
-      } else {
-        toast.error(result.error || 'Erro ao registrar troca');
-      }
-    } catch (error) {
-      console.error('Erro ao registrar troca:', error);
-      toast.error('Erro ao registrar troca de proteína');
-    } finally {
-      setSubmitting(false);
+      if (!res.ok) throw new Error();
+      const out = await res.json();
+      toast.success(`Trocas salvas (${out.inseridas || payload.length}).`);
+    } catch {
+      toast.error('Falha ao salvar trocas.');
     }
   };
 
-  const formatarData = (dataString: string) => {
-    const data = new Date(dataString + 'T00:00:00');
-    return data.toLocaleDateString('pt-BR');
-  };
+  // Header de auth (compatível com seu middleware base64(JSON))
+  function authHeader() {
+    let token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token');
+    if (!token) {
+      const payload = { email: user?.email || 'dev@local', name: user?.name || 'Dev', sector: (user as any)?.setor || 'TI' };
+      token = btoa(JSON.stringify(payload));
+    }
+    return { Authorization: `Bearer ${token}` };
+  }
 
-  const getMinDate = () => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  };
+  // Resumo simples
+  const totalSelecionadas = Object.values(trocas).filter(t => t.proteina_nova && t.proteina_nova !== t.proteina_original && t.proteina_original).length;
+  const totalDiasComCardapio = diasDoMes.filter(d => originalByDate[format(d, 'yyyy-MM-dd')]).length;
+  const faltantes = Math.max(totalDiasComCardapio - totalSelecionadas, 0);
 
   return (
     <Layout>
-      <div className="max-w-4xl mx-auto p-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Troca de Proteínas</h1>
-          <p className="text-gray-600">
-            Registre suas trocas de proteína do cardápio e ganhe pontos!
-          </p>
-        </div>
-
-        {/* Formulário de Nova Troca */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-            <Utensils className="w-5 h-5 mr-2 text-blue-600" />
-            Nova Troca de Proteína
-          </h2>
-          
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Data da Refeição
-                </label>
-                <div className="relative">
-                  <Calendar className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                  <input
-                    type="date"
-                    value={formData.data}
-                    onChange={(e) => setFormData({ ...formData, data: e.target.value })}
-                    min={getMinDate()}
-                    className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    required
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Proteína Original
-                </label>
-                <select
-                  value={formData.proteina_original}
-                  onChange={(e) => setFormData({ ...formData, proteina_original: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Selecione...</option>
-                  {proteinasDisponiveis.map((proteina) => (
-                    <option key={proteina} value={proteina}>
-                      {proteina}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nova Proteína
-                </label>
-                <select
-                  value={formData.proteina_nova}
-                  onChange={(e) => setFormData({ ...formData, proteina_nova: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  required
-                >
-                  <option value="">Selecione...</option>
-                  {proteinasDisponiveis
-                    .filter(proteina => proteina !== formData.proteina_original)
-                    .map((proteina) => (
-                      <option key={proteina} value={proteina}>
-                        {proteina}
-                      </option>
-                    ))}
-                </select>
-              </div>
+      <div className="p-4 md:p-6 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
+          <div>
+            <h1 className="text-xl md:text-2xl font-semibold">Troca de Proteínas</h1>
+            <p className="text-sm text-slate-600">
+              Defina trocas usando as proteínas disponíveis no cardápio do mês. Você pode aplicar a mesma proteína para todos os dias disponíveis.
+            </p>
+            <div className="mt-2 text-xs text-slate-500">
+              Selecionadas: <strong>{totalSelecionadas}</strong> · Restantes: <strong>{faltantes}</strong> (dias com cardápio)
             </div>
+          </div>
 
-            <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-              <div className="flex items-start">
-                <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 mr-2" />
-                <div className="text-sm text-blue-800">
-                  <p className="font-medium mb-1">Importante:</p>
-                  <ul className="list-disc list-inside space-y-1">
-                    <li>Você pode registrar apenas uma troca por dia</li>
-                    <li>A troca deve ser registrada no mesmo dia ou com antecedência</li>
-                    <li>Cada troca registrada vale +5 pontos</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={submitting}
-              className="w-full bg-blue-600 text-white py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+          <div className="flex items-center gap-2">
+            <select
+              className="border rounded-lg px-3 py-2"
+              value={applyAllProtein}
+              onChange={(e) => setApplyAllProtein(e.target.value)}
             >
-              {submitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Registrando...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  Registrar Troca
-                </>
-              )}
+              <option value="">Trocar todos os dias para…</option>
+              {opcoesProteina.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <button
+              onClick={aplicarParaTodos}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border hover:bg-slate-50"
+            >
+              <Repeat className="w-4 h-4" /> Aplicar em todos
             </button>
-          </form>
+            <button
+              onClick={salvar}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white"
+            >
+              <Save className="w-4 h-4" /> Salvar seleções
+            </button>
+          </div>
         </div>
 
-        {/* Histórico de Trocas */}
-        <div className="bg-white rounded-lg shadow-md p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-            <Clock className="w-5 h-5 mr-2 text-green-600" />
-            Histórico de Trocas
-          </h2>
+        <div className="overflow-auto rounded-xl border bg-white">
+          <table className="min-w-[860px] w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-3 py-2 text-left">Data</th>
+                <th className="px-3 py-2 text-left">Proteína do Cardápio</th>
+                <th className="px-3 py-2 text-left">Trocar para</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diasDoMes.map((d) => {
+                const dataISO = format(d, 'yyyy-MM-dd');
+                const original = originalByDate[dataISO] || ''; // vazio quando não há cardápio
+                const selected = trocas[dataISO]?.proteina_nova || "";
 
-          {loading ? (
-            <div className="flex justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-          ) : trocas.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              <Utensils className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-              <p>Nenhuma troca registrada ainda</p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {trocas.map((troca) => (
-                <div
-                  key={troca.id}
-                  className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center space-x-4 mb-2">
-                        <span className="font-medium text-gray-900">
-                          {formatarData(troca.data)}
-                        </span>
-                        <span className="text-sm text-gray-500 capitalize">
-                          {troca.dia}
-                        </span>
-                      </div>
-                      <div className="flex items-center space-x-2 text-sm text-gray-600">
-                        <span className="bg-red-100 text-red-800 px-2 py-1 rounded">
-                          {troca.proteina_original}
-                        </span>
-                        <span>→</span>
-                        <span className="bg-green-100 text-green-800 px-2 py-1 rounded">
-                          {troca.proteina_nova}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-sm text-green-600 font-medium">
-                        +5 pontos
-                      </div>
-                      <div className="text-xs text-gray-500">
-                        {new Date(troca.created_at).toLocaleDateString('pt-BR')}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                const disabled = !original; // quando não há cardápio nesse dia, não permite trocar
+                return (
+                  <tr key={dataISO} className="border-t">
+                    <td className="px-3 py-2">{format(d, 'dd/MM/yyyy (EEE)', { locale: ptBR })}</td>
+                    <td className="px-3 py-2">{original || <span className="text-slate-400">— sem cardápio —</span>}</td>
+                    <td className="px-3 py-2">
+                      <select
+                        className="border rounded-lg px-2 py-1 w-full"
+                        value={selected}
+                        onChange={(e) => handleChange(dataISO, e.target.value)}
+                        disabled={disabled}
+                        title={disabled ? 'Não há cardápio neste dia' : undefined}
+                      >
+                        <option value="">— Manter original —</option>
+                        {opcoesProteina.map((p) => (
+                          <option key={p} value={p} disabled={p === original}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </div>
     </Layout>
   );
-}
+};
+
+export default TrocaProteinas;
