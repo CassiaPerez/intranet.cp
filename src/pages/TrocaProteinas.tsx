@@ -25,7 +25,7 @@ type Troca = {
   proteina_nova?: string;
 };
 
-const TrocaProteinas: React.FC = () => {
+export const TrocaProteinas: React.FC = () => {
   const { user } = useAuth();
   const hoje = new Date();
   const ano = hoje.getFullYear();
@@ -263,5 +263,3 @@ const TrocaProteinas: React.FC = () => {
     </Layout>
   );
 };
-
-export default TrocaProteinas;
