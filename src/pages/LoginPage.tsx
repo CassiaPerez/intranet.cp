@@ -49,16 +49,16 @@ export const LoginPage: React.FC = () => {
       } else {
         let errorMessage = 'Credenciais inválidas';
         try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch (jsonError) {
-          // If JSON parsing fails, try to get text response
+          const responseText = await response.text();
           try {
-            const errorText = await response.text();
-            errorMessage = errorText || errorMessage;
-          } catch (textError) {
-            console.error('Failed to parse error response:', textError);
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.error || errorMessage;
+          } catch (jsonError) {
+            // If JSON parsing fails, use the raw text
+            errorMessage = responseText || errorMessage;
           }
+        } catch (error) {
+          console.error('Failed to read error response:', error);
         }
         toast.error(errorMessage);
       }
