@@ -380,10 +380,10 @@ app.get('/api/me', authMiddleware, getUserMiddleware, (req, res) => {
     ok: true,
     user: {
       id: req.user.id,
+      name: req.user.nome,
       email: req.user.email,
-      nome: req.user.nome,
-      foto: req.user.foto,
-      setor: req.user.setor
+      sector: req.user.setor,
+      avatar: req.user.foto
     }
   });
 });
