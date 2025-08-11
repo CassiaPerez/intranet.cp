@@ -92,7 +92,11 @@ export const TrocaProteinas: React.FC = () => {
 
   // Opções = união das proteínas que aparecem no mês (padrão + light)
   const opcoesProteina = useMemo(() => {
-    const set = new Set<string>();
+    // Opções fixas de troca de proteína
+    const opcoesPadrao = new Set(['Frango', 'Omelete', 'Ovo frito', 'Ovo cozido']);
+    
+    // Adiciona proteínas do cardápio carregado
+    const set = new Set(opcoesPadrao);
     for (const a of cardapioPadrao) if (a.proteina) set.add(a.proteina);
     for (const b of cardapioLight) if (b.proteina) set.add(b.proteina);
     return Array.from(set).sort((a,b) => a.localeCompare(b, 'pt-BR'));
