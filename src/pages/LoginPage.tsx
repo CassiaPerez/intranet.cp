@@ -72,6 +72,7 @@ export const LoginPage: React.FC = () => {
       } else {
         let errorMessage = 'Credenciais inválidas';
         try {
+        }
         toast.error('Credenciais inválidas');
       }
     } catch (error) {
