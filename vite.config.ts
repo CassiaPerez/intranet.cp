@@ -11,8 +11,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
-      port: 5176,
-      strictPort: true,
+      port: 0,
+      strictPort: false,
       host: true, // acessível pela rede/StackBlitz
       proxy: {
         '/api': {
