@@ -327,7 +327,7 @@ export const ReservaSalas: React.FC = () => {
                 slotMaxTime="19:00:00"
                 businessHours={{ daysOfWeek: [1, 2, 3, 4, 5], startTime: '08:00', endTime: '18:00' }}
                 eventClick={(info) => {
-                  toast.info(`${info.event.extendedProps.motivo} - ${info.event.extendedProps.responsavel}`);
+                  toast(`${info.event.extendedProps.motivo} - ${info.event.extendedProps.responsavel}`);
                 }}
               />
             </div>
