@@ -4,10 +4,10 @@ const API_BASE = '';
 
 interface User {
   id: string;
-  nome: string;
+  name: string;
   email: string;
-  setor: string;
-  foto?: string;
+  sector: string;
+  avatar?: string;
 }
 
 interface AuthContextType {

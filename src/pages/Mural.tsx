@@ -82,6 +82,7 @@ export const Mural: React.FC = () => {
   ]);
 
   const canPost = user?.setor === 'TI' || user?.setor === 'RH';
+  const isAdmin = ((user as any)?.sector || (user as any)?.setor) === 'TI' || ((user as any)?.sector || (user as any)?.setor) === 'RH';
 
   const handleCreatePost = (e: React.FormEvent) => {
     e.preventDefault();
@@ -95,9 +96,9 @@ export const Mural: React.FC = () => {
       id: Date.now().toString(),
       title: newPost.title,
       content: newPost.content,
-      author: user?.nome || 'Usuário',
-      authorId: user?.id || '0',
-      authorSector: user?.setor || '',
+      author: (user as any)?.name || (user as any)?.nome || 'Usuário',
+      authorId: (user as any)?.id || '0',
+      authorSector: (user as any)?.sector || (user as any)?.setor || '',
       date: new Date(),
       reactions: [],
       comments: [],

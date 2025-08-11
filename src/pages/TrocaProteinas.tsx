@@ -40,9 +40,10 @@ export const TrocaProteinas: React.FC = () => {
   useEffect(() => {
     (async () => {
       try {
+        // Load from static JSON files
         const [padrao, light] = await Promise.all([
-          fetch(`/api/cardapio?ano=${ano}&mes=${mes}&tipo=padrao`, { headers: authHeader() }).then(r => r.json()),
-          fetch(`/api/cardapio?ano=${ano}&mes=${mes}&tipo=light`, { headers: authHeader() }).then(r => r.json()),
+          fetch('/cardapio/cardapio-agosto-padrao.json').then(r => r.json()),
+          fetch('/cardapio/cardapio-agosto-light.json').then(r => r.json()),
         ]);
         setCardapioPadrao(Array.isArray(padrao) ? padrao : []);
         setCardapioLight(Array.isArray(light) ? light : []);
@@ -50,10 +51,12 @@ export const TrocaProteinas: React.FC = () => {
         // Carregar trocas existentes no mês (seu backend já expõe esse GET)
         const from = format(startOfMonth(hoje), 'yyyy-MM-01');
         const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
-        const prev = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { headers: authHeader() }).then(r => r.json());
-        if (Array.isArray(prev)) {
+        const prevRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, { credentials: 'include' });
+        if (prevRes.ok) {
+          const prev = await prevRes.json();
+          const trocasData = prev.trocas || [];
           const map: Record<string, Troca> = {};
-          for (const t of prev) {
+          for (const t of trocasData) {
             const dataISO = format(new Date(t.data), 'yyyy-MM-dd');
             map[dataISO] = { data: dataISO, proteina_original: t.proteina_original || "", proteina_nova: t.proteina_nova };
           }
@@ -64,8 +67,6 @@ export const TrocaProteinas: React.FC = () => {
         toast.error('Falha ao carregar dados do cardápio.');
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Todos os dias do mês (sempre)
   const diasDoMes = useMemo(() => {

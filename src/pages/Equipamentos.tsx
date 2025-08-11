@@ -103,8 +103,8 @@ export const Equipamentos: React.FC = () => {
         priority: formData.priority,
         status: 'pending',
         requestDate: new Date(),
-        user: user?.name || 'Usuário',
-        userEmail: user?.email || '',
+        user: (user as any)?.name || (user as any)?.nome || 'Usuário',
+        userEmail: (user as any)?.email || '',
       };
 
       setRequests(prev => [newRequest, ...prev]);
@@ -134,8 +134,8 @@ export const Equipamentos: React.FC = () => {
     }
   };
 
-  const userRequests = requests.filter(req => req.userEmail === user?.email);
-  const allRequests = user?.sector === 'TI' ? requests : userRequests;
+  const userRequests = requests.filter(req => req.userEmail === (user as any)?.email);
+  const allRequests = ((user as any)?.sector || (user as any)?.setor) === 'TI' ? requests : userRequests;
 
   return (
     <Layout>

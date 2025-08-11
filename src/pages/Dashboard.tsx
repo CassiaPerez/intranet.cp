@@ -121,7 +121,7 @@ export const Dashboard: React.FC = () => {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-3xl font-bold mb-2">
-                Olá, {user?.nome?.split(' ')[0]}! 👋
+                Olá, {((user as any)?.name || (user as any)?.nome)?.split(' ')[0]}! 👋
               </h1>
               <p className="text-blue-100 mb-4">
                 Bem-vindo de volta à Intranet do Grupo Cropfield

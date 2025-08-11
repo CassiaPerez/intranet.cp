@@ -52,7 +52,7 @@ const SidebarComponent: React.FC = () => {
   const inRouter = useInRouterContext();
   const location = inRouter ? useLocation() : (null as any);
 
-  const setor = (user as any)?.setor || (user as any)?.role || (user as any)?.department;
+  const setor = (user as any)?.sector || (user as any)?.setor || (user as any)?.role || (user as any)?.department;
   const isAdmin = setor === "TI" || setor === "RH";
 
   const items = useMemo(
