@@ -70,8 +70,6 @@ export const LoginPage: React.FC = () => {
         window.location.href = '/';
       } else {
         let errorMessage = 'Credenciais inválidas';
-        try {
-        }
         toast.error('Credenciais inválidas');
       }
     } catch (error) {
