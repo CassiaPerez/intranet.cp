@@ -64,7 +64,6 @@ export const LoginPage: React.FC = () => {
 
       if (response.ok) {
         const data = await response.json();
-        let data;
         
         toast.success('Login realizado com sucesso!');
         // Reload to trigger auth check
