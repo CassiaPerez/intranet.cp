@@ -47,9 +47,21 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       });
       
       if (response.ok) {
-        const data = await response.json();
-        setUser(data.user);
-        setIsAuthenticated(true);
+        const responseText = await response.text();
+        if (responseText) {
+          try {
+            const data = JSON.parse(responseText);
+            setUser(data.user);
+            setIsAuthenticated(true);
+          } catch (parseError) {
+            console.error('Failed to parse auth response:', parseError);
+            setUser(null);
+            setIsAuthenticated(false);
+          }
+        } else {
+          setUser(null);
+          setIsAuthenticated(false);
+        }
       } else {
         setUser(null);
         setIsAuthenticated(false);

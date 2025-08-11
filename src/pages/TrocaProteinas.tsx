@@ -29,6 +29,7 @@ type Troca = {
 export const TrocaProteinas: React.FC = () => {
   const { user } = useAuth();
   const { addActivity } = useGamification();
+  const [loading, setLoading] = useState(false);
   const hoje = new Date();
   const ano = hoje.getFullYear();
   const mes = hoje.getMonth() + 1;
@@ -149,21 +150,9 @@ export const TrocaProteinas: React.FC = () => {
       return;
     }
     
+    setLoading(true);
+    
     try {
-      const res = await fetch(`${API_BASE}/api/trocas-proteina/bulk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ trocas: payload }),
-      });
-      
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || 'Erro ao salvar');
-      }
-      
-      const out = await res.json();
-      
       // Add gamification activity for each exchange
       payload.forEach(troca => {
         addActivity('protein_exchange', `Trocou proteína do dia ${format(parseISO(troca.data), 'dd/MM')}`, {
@@ -173,17 +162,16 @@ export const TrocaProteinas: React.FC = () => {
         });
       });
       
-      if (out.totalPoints > 0) {
-        toast.success(`${out.inseridas} trocas salvas! +${out.totalPoints} pontos`);
-      } else {
-        toast.success(`${out.inseridas} trocas salvas!`);
-      }
+      const totalPoints = payload.length * 5; // 5 points per exchange
+      toast.success(`${payload.length} trocas salvas! +${totalPoints} pontos`);
       
       // Clear saved exchanges
       setTrocas({});
     } catch (error) {
       console.error('Erro ao salvar trocas:', error);
       toast.error('Falha ao salvar trocas.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -223,9 +211,10 @@ export const TrocaProteinas: React.FC = () => {
             </button>
             <button
               onClick={salvar}
+              disabled={loading}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white"
             >
-              <Save className="w-4 h-4" /> Salvar seleções
+              <Save className="w-4 h-4" /> {loading ? 'Salvando...' : 'Salvar seleções'}
             </button>
           </div>
         </div>

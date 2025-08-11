@@ -32,12 +32,12 @@ export const Header: React.FC = () => {
 
           <div className="flex items-center space-x-3">
             <img
-              src={(user as any)?.avatar || (user as any)?.foto || 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150'}
-              alt={(user as any)?.name || (user as any)?.nome}
+              src={user?.avatar || 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150'}
+              alt={user?.name || 'Usuário'}
               className="w-8 h-8 rounded-full object-cover"
             />
             <div className="flex flex-col">
-              <span className="text-sm font-medium text-gray-700">{(user as any)?.name || (user as any)?.nome}</span>
+              <span className="text-sm font-medium text-gray-700">{user?.name || 'Usuário'}</span>
               <span className="text-xs text-gray-500">{userStats?.totalPoints || 0} pts • Nível {userStats?.level || 1}</span>
             </div>
           </div>

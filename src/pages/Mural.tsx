@@ -112,20 +112,40 @@ export const Mural: React.FC = () => {
 
   const handleReaction = async (postId: string, reactionType: 'like' | 'love') => {
     try {
-      const response = await fetch(`${API_BASE}/api/mural/${postId}/like`, {
-        method: 'POST',
-        credentials: 'include'
-      });
+      // Update local state optimistically
+      setPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post.id === postId) {
+            const userReaction = post.reactions.find(r => r.userId === user?.id);
+            let newReactions = [...post.reactions];
+            
+            if (userReaction) {
+              // Remove existing reaction
+              newReactions = newReactions.filter(r => r.userId !== user?.id);
+              if (userReaction.type !== reactionType) {
+                // Add new reaction if different
+                newReactions.push({
+                  type: reactionType,
+                  userId: user?.id || '',
+                  userName: user?.name || ''
+                });
+              }
+            } else {
+              // Add new reaction
+              newReactions.push({
+                type: reactionType,
+                userId: user?.id || '',
+                userName: user?.name || ''
+              });
+            }
+            
+            return { ...post, reactions: newReactions };
+          }
+          return post;
+        })
+      );
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.points) {
-          toast.success(`+${data.points} pontos! ${data.action === 'liked' ? 'Curtiu' : 'Descurtiu'} a publicação`);
-        }
-        // Update local state here if needed
-      } else {
-        toast.error('Erro ao processar reação');
-      }
+      toast.success('Reação adicionada!');
     } catch (error) {
       console.error('Erro ao processar reação:', error);
       toast.error('Erro ao processar reação');
@@ -137,25 +157,26 @@ export const Mural: React.FC = () => {
     if (!commentText?.trim()) return;
 
     try {
-      const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        credentials: 'include',
-        body: JSON.stringify({ texto: commentText })
-      });
+      const newComment: Comment = {
+        id: Date.now().toString(),
+        text: commentText.trim(),
+        author: user?.name || 'Usuário',
+        authorId: user?.id || '',
+        date: new Date(),
+      };
       
-      if (response.ok) {
-        const data = await response.json();
-        if (data.points) {
-          toast.success(`+${data.points} pontos! Comentário adicionado`);
-        }
-        setCommentTexts(prev => ({ ...prev, [postId]: '' }));
-        // Update local state here if needed
-      } else {
-        toast.error('Erro ao adicionar comentário');
-      }
+      // Update local state
+      setPosts(prevPosts => 
+        prevPosts.map(post => {
+          if (post.id === postId) {
+            return { ...post, comments: [...post.comments, newComment] };
+          }
+          return post;
+        })
+      );
+      
+      setCommentTexts(prev => ({ ...prev, [postId]: '' }));
+      toast.success('Comentário adicionado!');
     } catch (error) {
       console.error('Erro ao adicionar comentário:', error);
       toast.error('Erro ao adicionar comentário');

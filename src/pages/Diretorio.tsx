@@ -27,16 +27,37 @@ export const Diretorio: React.FC = () => {
 
   const loadContacts = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/contatos?q=${searchTerm}`, {
-        credentials: 'include'
-      });
+      const response = await fetch(`/dados/contatos.json`);
       
       if (response.ok) {
-        const data = await response.json();
-        setEmployees(data);
+        const responseText = await response.text();
+        if (responseText) {
+          try {
+            const data = JSON.parse(responseText);
+            let filteredData = data;
+            
+            if (searchTerm) {
+              const query = searchTerm.toLowerCase();
+              filteredData = data.filter((contato: any) => 
+                contato.nome.toLowerCase().includes(query) ||
+                contato.email.toLowerCase().includes(query) ||
+                contato.ramal.toLowerCase().includes(query) ||
+                contato.setor.toLowerCase().includes(query)
+              );
+            }
+            
+            setEmployees(filteredData);
+          } catch (parseError) {
+            console.error('Failed to parse contacts:', parseError);
+            setEmployees([]);
+          }
+        }
+      } else {
+        setEmployees([]);
       }
     } catch (error) {
       console.error('Erro ao carregar contatos:', error);
+      setEmployees([]);
     } finally {
       setLoading(false);
     }
