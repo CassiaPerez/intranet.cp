@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
-import { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import { Calendar, Clock, MapPin, Users, Plus, User } from 'lucide-react';
+import { Calendar, Clock, MapPin, Users, Plus, User, CheckCircle } from 'lucide-react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -23,6 +22,7 @@ export const ReservaSalas: React.FC = () => {
   const { user } = useAuth();
   const { addActivity } = useGamification();
   const [activeTab, setActiveTab] = useState<'salas' | 'portaria'>('salas');
+  const [selectedRoom, setSelectedRoom] = useState<string>('aquario');
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,11 +42,13 @@ export const ReservaSalas: React.FC = () => {
     observacao: '',
   });
 
-  const [events, setEvents] = useState([]);
+  const [events, setEvents] = useState<any[]>([]);
+  const [agendamentos, setAgendamentos] = useState<any[]>([]);
 
   // Load reservations from database
   useEffect(() => {
     loadReservations();
+    loadAgendamentos();
   }, []);
 
   const loadReservations = async () => {
@@ -57,7 +59,7 @@ export const ReservaSalas: React.FC = () => {
       
       if (response.ok) {
         const data = await response.json();
-        const formattedEvents = data.reservas.map(reserva => {
+        const formattedEvents = data.reservas.map((reserva: any) => {
           const sala = salas.find(s => s.id === reserva.sala);
           return {
             id: reserva.id.toString(),
@@ -65,8 +67,10 @@ export const ReservaSalas: React.FC = () => {
             start: `${reserva.data}T${reserva.inicio}:00`,
             end: `${reserva.data}T${reserva.fim}:00`,
             backgroundColor: sala?.color || '#3B82F6',
+            borderColor: sala?.color || '#3B82F6',
             extendedProps: {
-              sala: sala?.name || reserva.sala,
+              sala: reserva.sala,
+              salaName: sala?.name || reserva.sala,
               motivo: reserva.assunto,
               responsavel: reserva.responsavel || 'Usuário',
             },
@@ -76,15 +80,42 @@ export const ReservaSalas: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao carregar reservas:', error);
-      // Keep empty events array if loading fails
+      setEvents([]);
     }
   };
 
+  const loadAgendamentos = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setAgendamentos(data.agendamentos || []);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar agendamentos:', error);
+      setAgendamentos([]);
+    }
+  };
+
+  // Filter events for selected room
+  const roomEvents = events.filter(event => event.extendedProps.sala === selectedRoom);
+
   const handleDateClick = (selectInfo: any) => {
     setSelectedDate(selectInfo.date);
+    const startTime = selectInfo.date.toISOString().slice(0, 16);
+    const endDate = new Date(selectInfo.date);
+    endDate.setHours(endDate.getHours() + 1);
+    const endTime = endDate.toISOString().slice(0, 16);
+    
     setReservationData({
-      ...reservationData,
-      inicio: selectInfo.date.toISOString().slice(0, 16),
+      sala: selectedRoom,
+      motivo: '',
+      descricao: '',
+      inicio: startTime,
+      fim: endTime,
     });
     setShowReservationModal(true);
   };
@@ -117,16 +148,14 @@ export const ReservaSalas: React.FC = () => {
       
       if (response.ok) {
         const data = await response.json();
-        addActivity('room_reservation', `Reservou ${reservationData.sala} para ${reservationData.motivo}`, {
+        const salaInfo = salas.find(s => s.id === reservationData.sala);
+        addActivity('room_reservation', `Reservou ${salaInfo?.name} para ${reservationData.motivo}`, {
           sala: reservationData.sala,
           data: reservationData.inicio.split('T')[0],
           motivo: reservationData.motivo,
         });
-        if (data.points) {
-          toast.success(`Reserva realizada com sucesso! +${data.points} pontos`);
-        } else {
-          toast.success('Reserva realizada com sucesso!');
-        }
+        
+        toast.success(`Reserva realizada com sucesso! +${data.points || 10} pontos`);
         setShowReservationModal(false);
         setReservationData({
           sala: '',
@@ -138,17 +167,8 @@ export const ReservaSalas: React.FC = () => {
         // Reload reservations to show the new one
         loadReservations();
       } else {
-        let errorMessage = 'Erro ao criar reserva';
-        try {
-          const responseText = await response.text();
-          if (responseText) {
-            const errorData = JSON.parse(responseText);
-            errorMessage = errorData.error || errorMessage;
-          }
-        } catch (parseError) {
-          console.warn('Erro ao parsear resposta de erro:', parseError);
-        }
-        toast.error(errorMessage);
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao criar reserva');
       }
     } catch (error) {
       console.error('Erro ao criar reserva:', error);
@@ -184,13 +204,9 @@ export const ReservaSalas: React.FC = () => {
           visitante: portariaData.visitante,
           data: portariaData.data,
         });
-        if (data.points) {
-          toast.success(`Agendamento realizado com sucesso! +${data.points} pontos`);
-        } else {
-          toast.success('Agendamento realizado com sucesso!');
-        }
-        // Reload reservations in case portaria affects calendar view
-        loadReservations();
+        
+        toast.success(`Agendamento realizado com sucesso! +${data.points || 10} pontos`);
+        loadAgendamentos();
         setPortariaData({
           data: '',
           hora: '',
@@ -199,17 +215,8 @@ export const ReservaSalas: React.FC = () => {
           observacao: '',
         });
       } else {
-        let errorMessage = 'Erro ao criar agendamento';
-        try {
-          const responseText = await response.text();
-          if (responseText) {
-            const errorData = JSON.parse(responseText);
-            errorMessage = errorData.error || errorMessage;
-          }
-        } catch (parseError) {
-          console.warn('Erro ao parsear resposta de erro:', parseError);
-        }
-        toast.error(errorMessage);
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao criar agendamento');
       }
     } catch (error) {
       console.error('Erro ao criar agendamento:', error);
@@ -225,7 +232,10 @@ export const ReservaSalas: React.FC = () => {
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Reserva de Espaços</h1>
           <button
-            onClick={() => setShowReservationModal(true)}
+            onClick={() => {
+              setReservationData({ ...reservationData, sala: selectedRoom });
+              setShowReservationModal(true);
+            }}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
           >
             <Plus className="w-4 h-4" />
@@ -259,29 +269,55 @@ export const ReservaSalas: React.FC = () => {
 
         {activeTab === 'salas' && (
           <>
-            {/* Salas Info */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {salas.map((sala) => (
-                <div key={sala.id} className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-                  <div className="flex items-center space-x-3">
-                    <div
-                      className="w-4 h-4 rounded-full"
-                      style={{ backgroundColor: sala.color }}
-                    ></div>
-                    <div>
-                      <h3 className="font-semibold text-gray-900">{sala.name}</h3>
-                      <div className="flex items-center space-x-1 mt-1">
-                        <Users className="w-3 h-3 text-gray-400" />
-                        <span className="text-xs text-gray-500">{sala.capacity} pessoas</span>
+            {/* Room Selection */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Selecione a Sala</h2>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                {salas.map((sala) => (
+                  <button
+                    key={sala.id}
+                    onClick={() => setSelectedRoom(sala.id)}
+                    className={`p-4 rounded-lg border-2 transition-all ${
+                      selectedRoom === sala.id
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-3">
+                      <div
+                        className="w-4 h-4 rounded-full"
+                        style={{ backgroundColor: sala.color }}
+                      ></div>
+                      <div className="text-left">
+                        <h3 className="font-semibold text-gray-900">{sala.name}</h3>
+                        <div className="flex items-center space-x-1 mt-1">
+                          <Users className="w-3 h-3 text-gray-400" />
+                          <span className="text-xs text-gray-500">{sala.capacity} pessoas</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ))}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Calendar */}
+            {/* Calendar for Selected Room */}
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Calendário - {salas.find(s => s.id === selectedRoom)?.name}
+                </h2>
+                <div className="flex items-center space-x-2">
+                  <div
+                    className="w-4 h-4 rounded-full"
+                    style={{ backgroundColor: salas.find(s => s.id === selectedRoom)?.color }}
+                  ></div>
+                  <span className="text-sm text-gray-600">
+                    {roomEvents.length} reservas
+                  </span>
+                </div>
+              </div>
+              
               <FullCalendar
                 plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
                 headerToolbar={{
@@ -290,12 +326,12 @@ export const ReservaSalas: React.FC = () => {
                   right: 'dayGridMonth,timeGridWeek,timeGridDay',
                 }}
                 initialView="timeGridWeek"
-                editable={true}
+                editable={false}
                 selectable={true}
                 selectMirror={true}
                 dayMaxEvents={true}
                 weekends={true}
-                events={events}
+                events={roomEvents}
                 select={handleDateClick}
                 locale="pt-br"
                 height="600px"
@@ -305,6 +341,9 @@ export const ReservaSalas: React.FC = () => {
                   daysOfWeek: [1, 2, 3, 4, 5],
                   startTime: '08:00',
                   endTime: '18:00',
+                }}
+                eventClick={(info) => {
+                  toast.info(`${info.event.extendedProps.motivo} - ${info.event.extendedProps.responsavel}`);
                 }}
               />
             </div>
@@ -321,7 +360,7 @@ export const ReservaSalas: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Data
+                    Data *
                   </label>
                   <input
                     type="date"
@@ -333,7 +372,7 @@ export const ReservaSalas: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Hora
+                    Hora *
                   </label>
                   <input
                     type="time"
@@ -345,7 +384,7 @@ export const ReservaSalas: React.FC = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nome do Visitante
+                    Nome do Visitante *
                   </label>
                   <input
                     type="text"
@@ -385,7 +424,7 @@ export const ReservaSalas: React.FC = () => {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                 >
                   {loading ? 'Agendando...' : 'Agendar Visita'}
                 </button>
@@ -394,30 +433,45 @@ export const ReservaSalas: React.FC = () => {
 
             {/* Lista de Agendamentos */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                <div className="flex items-center space-x-4">
-                  <div className="bg-blue-100 rounded-lg p-3">
-                    <User className="w-6 h-6 text-blue-600" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">Visita - Cliente ABC Corp</h3>
-                    <p className="text-sm text-gray-600">Recepcionado por: Maria Santos</p>
-                    <div className="flex items-center space-x-4 mt-1">
-                      <div className="flex items-center space-x-1">
-                        <Calendar className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-500">15/01/2025</span>
+              <h3 className="text-lg font-medium text-gray-900">Agendamentos Recentes</h3>
+              {agendamentos.length === 0 ? (
+                <div className="text-center py-8">
+                  <Calendar className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-600">Nenhum agendamento encontrado</p>
+                </div>
+              ) : (
+                agendamentos.map((agendamento, index) => (
+                  <div key={index} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                    <div className="flex items-center space-x-4">
+                      <div className="bg-blue-100 rounded-lg p-3">
+                        <User className="w-6 h-6 text-blue-600" />
                       </div>
-                      <div className="flex items-center space-x-1">
-                        <Clock className="w-4 h-4 text-gray-400" />
-                        <span className="text-sm text-gray-500">14:00 - 16:00</span>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{agendamento.visitante}</h3>
+                        <p className="text-sm text-gray-600">
+                          {agendamento.documento && `Doc: ${agendamento.documento}`}
+                        </p>
+                        <div className="flex items-center space-x-4 mt-1">
+                          <div className="flex items-center space-x-1">
+                            <Calendar className="w-4 h-4 text-gray-400" />
+                            <span className="text-sm text-gray-500">{agendamento.data}</span>
+                          </div>
+                          <div className="flex items-center space-x-1">
+                            <Clock className="w-4 h-4 text-gray-400" />
+                            <span className="text-sm text-gray-500">{agendamento.hora}</span>
+                          </div>
+                        </div>
+                        {agendamento.observacao && (
+                          <p className="text-xs text-gray-500 mt-1">{agendamento.observacao}</p>
+                        )}
                       </div>
                     </div>
+                    <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
+                      Agendado
+                    </span>
                   </div>
-                </div>
-                <span className="px-3 py-1 text-xs font-medium bg-green-100 text-green-800 rounded-full">
-                  Confirmado
-                </span>
-              </div>
+                ))
+              )}
             </div>
           </div>
         )}
@@ -513,7 +567,7 @@ export const ReservaSalas: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
                     >
                       {loading ? 'Reservando...' : 'Reservar'}
                     </button>
