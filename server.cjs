@@ -309,6 +309,64 @@ app.post('/auth/logout', (req, res) => {
   res.json({ ok: true, message: 'Logout realizado com sucesso' });
 });
 
+// Manual login endpoint
+app.post('/auth/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+      return res.status(400).json({ ok: false, error: 'Email e senha são obrigatórios' });
+    }
+    
+    // Simple hardcoded users for demo - in production, use proper password hashing
+    const users = [
+      { id: 1, email: 'admin@grupocropfield.com.br', password: 'admin123', nome: 'Administrador', setor: 'TI' },
+      { id: 2, email: 'rh@grupocropfield.com.br', password: 'rh123', nome: 'RH Manager', setor: 'RH' },
+      { id: 3, email: 'user@grupocropfield.com.br', password: 'user123', nome: 'Usuário Teste', setor: 'Geral' },
+    ];
+    
+    const user = users.find(u => u.email === email && u.password === password);
+    
+    if (!user) {
+      return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+    }
+    
+    // Check if user exists in database, if not create
+    let dbUser = await get("SELECT * FROM usuarios WHERE email = ?", [email]);
+    
+    if (!dbUser) {
+      const result = await run(
+        "INSERT INTO usuarios(email, nome, setor) VALUES(?, ?, ?)",
+        [user.email, user.nome, user.setor]
+      );
+      dbUser = { id: result.lastID, email: user.email, nome: user.nome, setor: user.setor };
+    }
+    
+    const token = jwt.sign({ sub: dbUser.id }, JWT_SECRET, { expiresIn: '7d' });
+    
+    res.cookie('sid', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+    
+    res.json({ 
+      ok: true, 
+      message: 'Login realizado com sucesso',
+      user: {
+        id: dbUser.id,
+        email: dbUser.email,
+        nome: dbUser.nome,
+        setor: dbUser.setor
+      }
+    });
+  } catch (error) {
+    console.error('Erro no login manual:', error);
+    res.status(500).json({ ok: false, error: 'Erro interno do servidor' });
+  }
+});
+
 // -------------------------------------------------------------
 // API routes
 // -------------------------------------------------------------

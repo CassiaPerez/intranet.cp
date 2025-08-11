@@ -11,6 +11,7 @@ export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   if (isAuthenticated) {
     return <Navigate to="/" replace />;
@@ -20,9 +21,41 @@ export const LoginPage: React.FC = () => {
     window.location.href = `${API_BASE}/auth/google`;
   };
 
-  const handleManualLogin = (e: React.FormEvent) => {
+  const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    toast.error('Login manual não implementado. Use o Google OAuth.');
+    
+    if (!email || !password) {
+      toast.error('Preencha todos os campos!');
+      return;
+    }
+
+    setLoading(true);
+    
+    try {
+      const response = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        toast.success('Login realizado com sucesso!');
+        // Reload to trigger auth check
+        window.location.href = '/';
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Credenciais inválidas');
+      }
+    } catch (error) {
+      console.error('Login error:', error);
+      toast.error('Erro ao fazer login. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -101,10 +134,10 @@ export const LoginPage: React.FC = () => {
 
             <button
               type="submit"
-              disabled={true}
-              className="w-full bg-gray-400 text-white py-3 rounded-lg font-medium cursor-not-allowed"
+              disabled={loading}
+              className="w-full bg-blue-600 text-white py-3 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Login Manual (Desabilitado)
+              {loading ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
 
