@@ -588,6 +588,23 @@ app.post('/api/reservas', authMiddleware, async (req, res) => {
   }
 });
 
+// Get all reservations
+app.get('/api/reservas', async (req, res) => {
+  try {
+    const reservas = await all(`
+      SELECT r.*, u.nome as responsavel
+      FROM reservas r
+      LEFT JOIN usuarios u ON r.user_id = u.id
+      ORDER BY r.data ASC, r.inicio ASC
+    `);
+    
+    res.json({ ok: true, reservas });
+  } catch (error) {
+    console.error('Erro ao buscar reservas:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar reservas' });
+  }
+});
+
 // -------------------------------------------------------------
 // Reception appointments routes
 // -------------------------------------------------------------

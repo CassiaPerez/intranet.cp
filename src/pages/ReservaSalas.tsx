@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { Calendar, Clock, MapPin, Users, Plus, User } from 'lucide-react';
 import FullCalendar from '@fullcalendar/react';
@@ -41,32 +42,43 @@ export const ReservaSalas: React.FC = () => {
     observacao: '',
   });
 
-  const [events] = useState([
-    {
-      id: '1',
-      title: 'Reunião de Vendas - João Silva',
-      start: '2025-01-15T09:00:00',
-      end: '2025-01-15T11:00:00',
-      backgroundColor: '#3B82F6',
-      extendedProps: {
-        sala: 'Sala Aquário',
-        motivo: 'Reunião de vendas',
-        responsavel: 'João Silva',
-      },
-    },
-    {
-      id: '2',
-      title: 'Treinamento - Maria Santos',
-      start: '2025-01-16T14:00:00',
-      end: '2025-01-16T17:00:00',
-      backgroundColor: '#10B981',
-      extendedProps: {
-        sala: 'Sala Grande',
-        motivo: 'Treinamento',
-        responsavel: 'Maria Santos',
-      },
-    },
-  ]);
+  const [events, setEvents] = useState([]);
+
+  // Load reservations from database
+  useEffect(() => {
+    loadReservations();
+  }, []);
+
+  const loadReservations = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/reservas`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        const formattedEvents = data.reservas.map(reserva => {
+          const sala = salas.find(s => s.id === reserva.sala);
+          return {
+            id: reserva.id.toString(),
+            title: `${reserva.assunto} - ${reserva.responsavel || 'Usuário'}`,
+            start: `${reserva.data}T${reserva.inicio}:00`,
+            end: `${reserva.data}T${reserva.fim}:00`,
+            backgroundColor: sala?.color || '#3B82F6',
+            extendedProps: {
+              sala: sala?.name || reserva.sala,
+              motivo: reserva.assunto,
+              responsavel: reserva.responsavel || 'Usuário',
+            },
+          };
+        });
+        setEvents(formattedEvents);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar reservas:', error);
+      // Keep empty events array if loading fails
+    }
+  };
 
   const handleDateClick = (selectInfo: any) => {
     setSelectedDate(selectInfo.date);
@@ -123,6 +135,8 @@ export const ReservaSalas: React.FC = () => {
           inicio: '',
           fim: '',
         });
+        // Reload reservations to show the new one
+        loadReservations();
       } else {
         let errorMessage = 'Erro ao criar reserva';
         try {
@@ -175,6 +189,8 @@ export const ReservaSalas: React.FC = () => {
         } else {
           toast.success('Agendamento realizado com sucesso!');
         }
+        // Reload reservations in case portaria affects calendar view
+        loadReservations();
         setPortariaData({
           data: '',
           hora: '',
