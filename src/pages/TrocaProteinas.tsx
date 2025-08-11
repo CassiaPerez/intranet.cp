@@ -7,6 +7,15 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useGamification } from '../contexts/GamificationContext';
 
+const PROTEIN_OPTIONS = ['Frango','Omelete','Ovo frito','Ovo cozido'] as const;
+type ProteinLabel = typeof PROTEIN_OPTIONS[number];
+const normalizeProtein = (v: string) => {
+  const m: Record<string, ProteinLabel> = {
+    frango: 'Frango', omelete: 'Omelete', 'ovo frito': 'Ovo frito', 'ovo cozido': 'Ovo cozido'
+  };
+  const k = v.trim().toLowerCase(); return m[k] ?? v;
+};
+
 const API_BASE = '';
 
 type CardapioItem = {
