@@ -124,8 +124,17 @@ export const ReservaSalas: React.FC = () => {
           fim: '',
         });
       } else {
-        const errorData = await response.json();
-        toast.error(errorData.error || 'Erro ao criar reserva');
+        let errorMessage = 'Erro ao criar reserva';
+        try {
+          const responseText = await response.text();
+          if (responseText) {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.error || errorMessage;
+          }
+        } catch (parseError) {
+          console.warn('Erro ao parsear resposta de erro:', parseError);
+        }
+        toast.error(errorMessage);
       }
     } catch (error) {
       console.error('Erro ao criar reserva:', error);
@@ -174,8 +183,17 @@ export const ReservaSalas: React.FC = () => {
           observacao: '',
         });
       } else {
-        const errorData = await response.json();
-        toast.error(errorData.error || 'Erro ao criar agendamento');
+        let errorMessage = 'Erro ao criar agendamento';
+        try {
+          const responseText = await response.text();
+          if (responseText) {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.error || errorMessage;
+          }
+        } catch (parseError) {
+          console.warn('Erro ao parsear resposta de erro:', parseError);
+        }
+        toast.error(errorMessage);
       }
     } catch (error) {
       console.error('Erro ao criar agendamento:', error);
