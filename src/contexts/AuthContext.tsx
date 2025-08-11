@@ -42,30 +42,46 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const checkAuth = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/me`, {
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        const responseText = await response.text();
-        if (responseText) {
-          try {
-            const data = JSON.parse(responseText);
-            setUser(data.user);
-            setIsAuthenticated(true);
-          } catch (parseError) {
-            console.error('Failed to parse auth response:', parseError);
-            setUser(null);
-            setIsAuthenticated(false);
-          }
-        } else {
-          setUser(null);
-          setIsAuthenticated(false);
+      // Check if user is stored in localStorage first
+      const storedUser = localStorage.getItem('currentUser');
+      if (storedUser) {
+        try {
+          const userData = JSON.parse(storedUser);
+          setUser(userData);
+          setIsAuthenticated(true);
+          return;
+        } catch (error) {
+          localStorage.removeItem('currentUser');
         }
-      } else {
-        setUser(null);
-        setIsAuthenticated(false);
       }
+
+      // Try API call as fallback
+      try {
+        const response = await fetch(`${API_BASE}/api/me`, {
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          const responseText = await response.text();
+          if (responseText) {
+            try {
+              const data = JSON.parse(responseText);
+              setUser(data.user);
+              setIsAuthenticated(true);
+              localStorage.setItem('currentUser', JSON.stringify(data.user));
+              return;
+            } catch (parseError) {
+              console.error('Failed to parse auth response:', parseError);
+            }
+          }
+        }
+      } catch (apiError) {
+        console.log('API not available, using local auth');
+      }
+
+      // If no stored user and API fails, user is not authenticated
+      setUser(null);
+      setIsAuthenticated(false);
     } catch (error) {
       console.error('Auth check error:', error);
       setUser(null);
@@ -77,6 +93,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
+      // Clear localStorage first
+      localStorage.removeItem('currentUser');
+      
       await fetch(`${API_BASE}/auth/logout`, {
         method: 'POST',
         credentials: 'include'

@@ -31,6 +31,27 @@ export const LoginPage: React.FC = () => {
 
     setLoading(true);
     
+    // Check hardcoded credentials first (for demo purposes)
+    const demoUsers = [
+      { id: '1', email: 'admin@grupocropfield.com.br', password: 'admin123', name: 'Administrador', sector: 'TI', avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150' },
+      { id: '2', email: 'rh@grupocropfield.com.br', password: 'rh123', name: 'RH Manager', sector: 'RH', avatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=150' },
+      { id: '3', email: 'user@grupocropfield.com.br', password: 'user123', name: 'Usuário Teste', sector: 'Geral', avatar: 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150' },
+      { id: '4', email: 'admin', password: 'admin', name: 'Admin', sector: 'TI', avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150' },
+      { id: '5', email: 'user', password: 'user', name: 'Usuário', sector: 'Geral', avatar: 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150' },
+    ];
+
+    const demoUser = demoUsers.find(u => u.email === email && u.password === password);
+    
+    if (demoUser) {
+      // Store user in localStorage for persistence
+      localStorage.setItem('currentUser', JSON.stringify(demoUser));
+      toast.success('Login realizado com sucesso!');
+      setLoading(false);
+      // Reload to trigger auth check
+      window.location.href = '/';
+      return;
+    }
+
     try {
       const response = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -43,28 +64,19 @@ export const LoginPage: React.FC = () => {
 
       if (response.ok) {
         const data = await response.json();
+        let data;
+        
         toast.success('Login realizado com sucesso!');
         // Reload to trigger auth check
         window.location.href = '/';
       } else {
         let errorMessage = 'Credenciais inválidas';
         try {
-          const responseText = await response.text();
-          try {
-            const errorData = JSON.parse(responseText);
-            errorMessage = errorData.error || errorMessage;
-          } catch (jsonError) {
-            // If JSON parsing fails, use the raw text
-            errorMessage = responseText || errorMessage;
-          }
-        } catch (error) {
-          console.error('Failed to read error response:', error);
-        }
-        toast.error(errorMessage);
+        toast.error('Credenciais inválidas');
       }
     } catch (error) {
       console.error('Login error:', error);
-      toast.error('Erro ao fazer login. Tente novamente.');
+      toast.error('Credenciais inválidas');
     } finally {
       setLoading(false);
     }
@@ -155,10 +167,11 @@ export const LoginPage: React.FC = () => {
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              Problemas para acessar?{' '}
-              <a href="#" className="text-blue-600 hover:underline">
-                Contate o TI
-              </a>
+              <strong>Credenciais de teste:</strong><br />
+              admin / admin ou user / user<br />
+              <span className="text-xs text-gray-500">
+                Ou use: admin@grupocropfield.com.br / admin123
+              </span>
             </p>
           </div>
         </div>
