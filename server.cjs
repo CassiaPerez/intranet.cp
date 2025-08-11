@@ -17,7 +17,7 @@ const { format, parseISO } = require('date-fns');
 const { ptBR } = require('date-fns/locale');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 5173;
 
 // Load environment variables
 require('dotenv').config();
