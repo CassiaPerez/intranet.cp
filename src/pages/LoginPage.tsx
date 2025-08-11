@@ -47,8 +47,20 @@ export const LoginPage: React.FC = () => {
         // Reload to trigger auth check
         window.location.href = '/';
       } else {
-        const errorData = await response.json();
-        toast.error(errorData.error || 'Credenciais inválidas');
+        let errorMessage = 'Credenciais inválidas';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (jsonError) {
+          // If JSON parsing fails, try to get text response
+          try {
+            const errorText = await response.text();
+            errorMessage = errorText || errorMessage;
+          } catch (textError) {
+            console.error('Failed to parse error response:', textError);
+          }
+        }
+        toast.error(errorMessage);
       }
     } catch (error) {
       console.error('Login error:', error);
