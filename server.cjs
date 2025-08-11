@@ -179,12 +179,20 @@ async function createSchema() {
     // Migration: Check and add user_id column to trocas_proteina if missing
     const tableInfo = await all("PRAGMA table_info(trocas_proteina)");
     const hasUserId = tableInfo.some(column => column.name === 'user_id');
+    const hasData = tableInfo.some(column => column.name === 'data');
     
     if (!hasUserId) {
       console.log('Adding missing user_id column to trocas_proteina table...');
       await run("ALTER TABLE trocas_proteina ADD COLUMN user_id INTEGER");
       console.log('user_id column added successfully');
     }
+    
+    if (!hasData) {
+      console.log('Adding missing data column to trocas_proteina table...');
+      await run("ALTER TABLE trocas_proteina ADD COLUMN data DATE");
+      console.log('data column added successfully');
+    }
+    
     console.log('Schema criado/verificado com sucesso');
   } catch (e) {
     console.error('Erro ao criar schema:', e);
