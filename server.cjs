@@ -17,7 +17,7 @@ const { format, parseISO } = require('date-fns');
 const { ptBR } = require('date-fns/locale');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3005; // << porta da API
 
 // Load environment variables
 require('dotenv').config();
@@ -26,7 +26,8 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-const OAUTH_CALLBACK_URL = process.env.OAUTH_CALLBACK_URL || 'http://localhost:3001/auth/google/callback';
+const OAUTH_CALLBACK_URL =
+  process.env.OAUTH_CALLBACK_URL || 'http://localhost:3005/auth/google/callback'; // << callback na 3005
 
 // Points system configuration
 const POINTS = {
@@ -40,8 +41,15 @@ const POINTS = {
 // -------------------------------------------------------------
 // Middleware setup
 // -------------------------------------------------------------
+const allowed = new Set([
+  FRONTEND_URL,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]);
+
 app.use(cors({
-  origin: FRONTEND_URL,
+  // em dev, libera qualquer origin; em prod, exige estar na whitelist
+  origin: (origin, cb) => cb(null, !origin || allowed.has(origin) || process.env.NODE_ENV !== 'production'),
   credentials: true
 }));
 app.use(express.json({ limit: '2mb' }));
@@ -176,23 +184,13 @@ async function createSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    // Migration: Check and add user_id column to trocas_proteina if missing
+    // Migration: Check and add user_id/data columns to trocas_proteina if missing
     const tableInfo = await all("PRAGMA table_info(trocas_proteina)");
     const hasUserId = tableInfo.some(column => column.name === 'user_id');
     const hasData = tableInfo.some(column => column.name === 'data');
-    
-    if (!hasUserId) {
-      console.log('Adding missing user_id column to trocas_proteina table...');
-      await run("ALTER TABLE trocas_proteina ADD COLUMN user_id INTEGER");
-      console.log('user_id column added successfully');
-    }
-    
-    if (!hasData) {
-      console.log('Adding missing data column to trocas_proteina table...');
-      await run("ALTER TABLE trocas_proteina ADD COLUMN data DATE");
-      console.log('data column added successfully');
-    }
-    
+    if (!hasUserId) await run("ALTER TABLE trocas_proteina ADD COLUMN user_id INTEGER");
+    if (!hasData) await run("ALTER TABLE trocas_proteina ADD COLUMN data DATE");
+
     console.log('Schema criado/verificado com sucesso');
   } catch (e) {
     console.error('Erro ao criar schema:', e);
@@ -233,23 +231,17 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
 
       // Upsert user
       let user = await get("SELECT * FROM usuarios WHERE google_id = ? OR email = ?", [google_id, email]);
-      
       if (user) {
-        // Update existing user
-        await run(
-          "UPDATE usuarios SET google_id = ?, nome = ?, foto = ? WHERE id = ?",
-          [google_id, nome, foto, user.id]
-        );
+        await run("UPDATE usuarios SET google_id = ?, nome = ?, foto = ? WHERE id = ?",
+          [google_id, nome, foto, user.id]);
         user = { ...user, google_id, nome, foto };
       } else {
-        // Create new user
         const result = await run(
           "INSERT INTO usuarios(google_id, email, nome, foto, setor) VALUES(?, ?, ?, ?, ?)",
           [google_id, email, nome, foto, 'Geral']
         );
         user = { id: result.lastID, google_id, email, nome, foto, setor: 'Geral' };
       }
-
       return done(null, user);
     } catch (error) {
       return done(error, null);
@@ -262,40 +254,29 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
 // -------------------------------------------------------------
 function authMiddleware(req, res, next) {
   const token = req.cookies.sid;
-  
-  if (!token) {
-    // For demo purposes, create a mock user if no token
-    req.userId = 1; // Default user ID
-    return next();
-  }
-  
+  if (!token) { req.userId = 1; return next(); } // demo user
+
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.sub;
     next();
-  } catch (e) {
-    // For demo purposes, create a mock user if token is invalid
-    req.userId = 1; // Default user ID
+  } catch {
+    req.userId = 1; // demo user
     next();
   }
 }
 
 async function getUserMiddleware(req, res, next) {
-  if (!req.userId) {
-    req.userId = 1; // Default user ID
-  }
-  
+  if (!req.userId) req.userId = 1;
   try {
     const user = await get("SELECT * FROM usuarios WHERE id = ?", [req.userId]);
     if (!user) {
-      // Create a default user for demo
       req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral' };
       return next();
     }
     req.user = user;
     next();
-  } catch (e) {
-    // Create a default user for demo
+  } catch {
     req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral' };
     next();
   }
@@ -304,23 +285,19 @@ async function getUserMiddleware(req, res, next) {
 // -------------------------------------------------------------
 // Auth routes
 // -------------------------------------------------------------
-app.get('/auth/google', passport.authenticate('google', {
-  scope: ['profile', 'email']
-}));
+app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
 
-app.get('/auth/google/callback', 
+app.get('/auth/google/callback',
   passport.authenticate('google', { session: false }),
   (req, res) => {
     try {
       const token = jwt.sign({ sub: req.user.id }, JWT_SECRET, { expiresIn: '7d' });
-      
       res.cookie('sid', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+        maxAge: 7 * 24 * 60 * 60 * 1000
       });
-      
       res.redirect(`${FRONTEND_URL}/`);
     } catch (error) {
       console.error('Erro no callback OAuth:', error);
@@ -338,27 +315,17 @@ app.post('/auth/logout', (req, res) => {
 app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    
-    if (!email || !password) {
-      return res.status(400).json({ ok: false, error: 'Email e senha são obrigatórios' });
-    }
-    
-    // Simple hardcoded users for demo - in production, use proper password hashing
+    if (!email || !password) return res.status(400).json({ ok: false, error: 'Email e senha são obrigatórios' });
+
     const users = [
       { id: 1, email: 'admin@grupocropfield.com.br', password: 'admin123', nome: 'Administrador', setor: 'TI' },
       { id: 2, email: 'rh@grupocropfield.com.br', password: 'rh123', nome: 'RH Manager', setor: 'RH' },
       { id: 3, email: 'user@grupocropfield.com.br', password: 'user123', nome: 'Usuário Teste', setor: 'Geral' },
     ];
-    
     const user = users.find(u => u.email === email && u.password === password);
-    
-    if (!user) {
-      return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
-    }
-    
-    // Check if user exists in database, if not create
+    if (!user) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+
     let dbUser = await get("SELECT * FROM usuarios WHERE email = ?", [email]);
-    
     if (!dbUser) {
       const result = await run(
         "INSERT INTO usuarios(email, nome, setor) VALUES(?, ?, ?)",
@@ -366,26 +333,17 @@ app.post('/auth/login', async (req, res) => {
       );
       dbUser = { id: result.lastID, email: user.email, nome: user.nome, setor: user.setor };
     }
-    
+
     const token = jwt.sign({ sub: dbUser.id }, JWT_SECRET, { expiresIn: '7d' });
-    
     res.cookie('sid', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
-    
-    res.json({ 
-      ok: true, 
-      message: 'Login realizado com sucesso',
-      user: {
-        id: dbUser.id,
-        email: dbUser.email,
-        nome: dbUser.nome,
-        setor: dbUser.setor
-      }
-    });
+
+    res.json({ ok: true, message: 'Login realizado com sucesso',
+      user: { id: dbUser.id, email: dbUser.email, nome: dbUser.nome, setor: dbUser.setor }});
   } catch (error) {
     console.error('Erro no login manual:', error);
     res.status(500).json({ ok: false, error: 'Erro interno do servidor' });
@@ -395,22 +353,13 @@ app.post('/auth/login', async (req, res) => {
 // -------------------------------------------------------------
 // API routes
 // -------------------------------------------------------------
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, message: 'Server running' });
-});
+app.get('/api/health', (_req, res) => res.json({ ok: true, message: 'Server running' }));
 
 // Get current user
 app.get('/api/me', authMiddleware, getUserMiddleware, (req, res) => {
-  res.json({
-    ok: true,
-    user: {
-      id: req.user.id,
-      name: req.user.nome,
-      email: req.user.email,
-      sector: req.user.setor,
-      avatar: req.user.foto
-    }
-  });
+  res.json({ ok: true, user: {
+    id: req.user.id, name: req.user.nome, email: req.user.email, sector: req.user.setor, avatar: req.user.foto
+  }});
 });
 
 // Get contacts from JSON
@@ -418,25 +367,16 @@ app.get('/api/contatos', (req, res) => {
   try {
     const { q } = req.query;
     const contatosPath = path.join(__dirname, 'public', 'dados', 'contatos.json');
-    
-    if (!fs.existsSync(contatosPath)) {
-      return res.json([]);
-    }
-    
+    if (!fs.existsSync(contatosPath)) return res.json([]);
     const contatos = JSON.parse(fs.readFileSync(contatosPath, 'utf8'));
-    
-    if (!q) {
-      return res.json(contatos);
-    }
-    
-    const query = q.toLowerCase();
-    const filtered = contatos.filter(contato => 
-      contato.nome.toLowerCase().includes(query) ||
-      contato.email.toLowerCase().includes(query) ||
-      contato.ramal.toLowerCase().includes(query) ||
-      contato.setor.toLowerCase().includes(query)
+    if (!q) return res.json(contatos);
+    const query = String(q).toLowerCase();
+    const filtered = contatos.filter(c =>
+      c.nome.toLowerCase().includes(query) ||
+      c.email.toLowerCase().includes(query) ||
+      c.ramal.toLowerCase().includes(query) ||
+      c.setor.toLowerCase().includes(query)
     );
-    
     res.json(filtered);
   } catch (error) {
     console.error('Erro ao buscar contatos:', error);
@@ -453,14 +393,8 @@ app.get('/api/pontos/minha-conta', authMiddleware, async (req, res) => {
       WHERE user_id = ? AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
       GROUP BY acao
     `, [req.userId]);
-    
     const totalPontos = pontos.reduce((sum, p) => sum + p.total, 0);
-    
-    res.json({
-      ok: true,
-      totalPontos,
-      breakdown: pontos
-    });
+    res.json({ ok: true, totalPontos, breakdown: pontos });
   } catch (error) {
     console.error('Erro ao buscar pontos:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar pontos' });
@@ -468,7 +402,7 @@ app.get('/api/pontos/minha-conta', authMiddleware, async (req, res) => {
 });
 
 // Get monthly ranking
-app.get('/api/pontos/ranking', async (req, res) => {
+app.get('/api/pontos/ranking', async (_req, res) => {
   try {
     const ranking = await all(`
       SELECT u.nome, u.foto, SUM(p.pontos) as total_pontos
@@ -479,7 +413,6 @@ app.get('/api/pontos/ranking', async (req, res) => {
       ORDER BY total_pontos DESC
       LIMIT 10
     `);
-    
     res.json({ ok: true, ranking });
   } catch (error) {
     console.error('Erro ao buscar ranking:', error);
@@ -490,7 +423,7 @@ app.get('/api/pontos/ranking', async (req, res) => {
 // -------------------------------------------------------------
 // Mural routes
 // -------------------------------------------------------------
-app.get('/api/mural/posts', async (req, res) => {
+app.get('/api/mural/posts', async (_req, res) => {
   try {
     const posts = await all(`
       SELECT p.*, 
@@ -499,9 +432,8 @@ app.get('/api/mural/posts', async (req, res) => {
       FROM mural_posts p
       ORDER BY p.pinned DESC, p.created_at DESC
     `);
-    
     res.json({ ok: true, posts });
-  } catch (error) {
+  } catch {
     res.status(500).json({ ok: false, error: 'Erro ao buscar posts' });
   }
 });
@@ -509,16 +441,11 @@ app.get('/api/mural/posts', async (req, res) => {
 app.post('/api/mural/:id/like', authMiddleware, async (req, res) => {
   try {
     const postId = req.params.id;
-    
-    // Check if already liked
     const existing = await get("SELECT * FROM mural_likes WHERE post_id = ? AND user_id = ?", [postId, req.userId]);
-    
     if (existing) {
-      // Remove like
       await run("DELETE FROM mural_likes WHERE post_id = ? AND user_id = ?", [postId, req.userId]);
       res.json({ ok: true, action: 'unliked' });
     } else {
-      // Add like
       await run("INSERT INTO mural_likes(post_id, user_id) VALUES(?, ?)", [postId, req.userId]);
       await registrarPontos(req.userId, 'MURAL_LIKE', POINTS.MURAL_LIKE, { post_id: postId });
       res.json({ ok: true, action: 'liked', points: POINTS.MURAL_LIKE });
@@ -533,18 +460,13 @@ app.post('/api/mural/:id/comments', authMiddleware, async (req, res) => {
   try {
     const postId = req.params.id;
     const { texto } = req.body;
-    
-    if (!texto?.trim()) {
-      return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
-    }
-    
+    if (!texto?.trim()) return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
+
     const result = await run(
       "INSERT INTO mural_comments(post_id, user_id, texto) VALUES(?, ?, ?)",
       [postId, req.userId, texto.trim()]
     );
-    
     await registrarPontos(req.userId, 'MURAL_COMMENT', POINTS.MURAL_COMMENT, { post_id: postId });
-    
     res.json({ ok: true, id: result.lastID, points: POINTS.MURAL_COMMENT });
   } catch (error) {
     console.error('Erro ao criar comentário:', error);
@@ -558,29 +480,26 @@ app.post('/api/mural/:id/comments', authMiddleware, async (req, res) => {
 app.post('/api/reservas', authMiddleware, async (req, res) => {
   try {
     const { sala, data, inicio, fim, assunto } = req.body;
-    
     if (!sala || !data || !inicio || !fim || !assunto) {
       return res.status(400).json({ ok: false, error: 'Todos os campos são obrigatórios' });
     }
-    
+
     // Check for conflicts
     const conflict = await get(`
       SELECT * FROM reservas 
       WHERE sala = ? AND data = ? 
       AND ((inicio <= ? AND fim > ?) OR (inicio < ? AND fim >= ?))
     `, [sala, data, inicio, inicio, fim, fim]);
-    
     if (conflict) {
       return res.status(400).json({ ok: false, error: 'Conflito de horário para esta sala' });
     }
-    
+
     const result = await run(
       "INSERT INTO reservas(sala, data, inicio, fim, assunto, user_id) VALUES(?, ?, ?, ?, ?, ?)",
       [sala, data, inicio, fim, assunto, req.userId]
     );
-    
+
     await registrarPontos(req.userId, 'RESERVA_CREATE', POINTS.RESERVA_CREATE, { sala, data });
-    
     res.json({ ok: true, id: result.lastID, points: POINTS.RESERVA_CREATE });
   } catch (error) {
     console.error('Erro ao criar reserva:', error);
@@ -588,8 +507,7 @@ app.post('/api/reservas', authMiddleware, async (req, res) => {
   }
 });
 
-// Get all reservations
-app.get('/api/reservas', async (req, res) => {
+app.get('/api/reservas', async (_req, res) => {
   try {
     const reservas = await all(`
       SELECT r.*, u.nome as responsavel
@@ -597,7 +515,6 @@ app.get('/api/reservas', async (req, res) => {
       LEFT JOIN usuarios u ON r.user_id = u.id
       ORDER BY r.data ASC, r.inicio ASC
     `);
-    
     res.json({ ok: true, reservas });
   } catch (error) {
     console.error('Erro ao buscar reservas:', error);
@@ -611,18 +528,16 @@ app.get('/api/reservas', async (req, res) => {
 app.post('/api/portaria/agendamentos', authMiddleware, async (req, res) => {
   try {
     const { data, hora, visitante, documento, observacao } = req.body;
-    
     if (!data || !hora || !visitante) {
       return res.status(400).json({ ok: false, error: 'Data, hora e visitante são obrigatórios' });
     }
-    
+
     const result = await run(
       "INSERT INTO portaria_agendamentos(data, hora, visitante, documento, observacao, user_id) VALUES(?, ?, ?, ?, ?, ?)",
       [data, hora, visitante, documento, observacao, req.userId]
     );
-    
+
     await registrarPontos(req.userId, 'PORTARIA_CREATE', POINTS.PORTARIA_CREATE, { data, visitante });
-    
     res.json({ ok: true, id: result.lastID, points: POINTS.PORTARIA_CREATE });
   } catch (error) {
     console.error('Erro ao criar agendamento:', error);
@@ -630,8 +545,7 @@ app.post('/api/portaria/agendamentos', authMiddleware, async (req, res) => {
   }
 });
 
-// Get reception appointments
-app.get('/api/portaria/agendamentos', async (req, res) => {
+app.get('/api/portaria/agendamentos', async (_req, res) => {
   try {
     const agendamentos = await all(`
       SELECT p.*, u.nome as responsavel
@@ -639,7 +553,6 @@ app.get('/api/portaria/agendamentos', async (req, res) => {
       LEFT JOIN usuarios u ON p.user_id = u.id
       ORDER BY p.data DESC, p.hora DESC
     `);
-    
     res.json({ ok: true, agendamentos });
   } catch (error) {
     console.error('Erro ao buscar agendamentos:', error);
@@ -653,39 +566,31 @@ app.get('/api/portaria/agendamentos', async (req, res) => {
 app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
   try {
     const { trocas } = req.body;
-    
     if (!Array.isArray(trocas) || trocas.length === 0) {
       return res.status(400).json({ ok: false, error: 'Lista de trocas é obrigatória' });
     }
-    
+
     let inseridas = 0;
-    
     for (const troca of trocas) {
       const { data, proteina_original, proteina_nova } = troca;
-      
-      if (!data || !proteina_nova || proteina_nova === proteina_original) {
-        continue;
-      }
-      
-      // Check if already exists for this user and date
+      if (!data || !proteina_nova || proteina_nova === proteina_original) continue;
+
       const existing = await get(
         "SELECT * FROM trocas_proteina WHERE user_id = ? AND data = ?",
         [req.userId, data]
       );
-      
+
       if (!existing) {
         const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
-        
         await run(
           "INSERT INTO trocas_proteina(data, dia, proteina_original, proteina_nova, user_id) VALUES(?, ?, ?, ?, ?)",
           [data, dia, proteina_original, proteina_nova, req.userId]
         );
-        
         await registrarPontos(req.userId, 'TROCA_PROTEINA', POINTS.TROCA_PROTEINA, { data });
         inseridas++;
       }
     }
-    
+
     const totalPoints = inseridas * POINTS.TROCA_PROTEINA;
     res.json({ ok: true, inseridas, totalPoints });
   } catch (error) {
@@ -694,21 +599,19 @@ app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
   }
 });
 
-// Get user's protein exchanges
 app.get('/api/trocas-proteina', authMiddleware, async (req, res) => {
   try {
     const { from, to } = req.query;
     let sql = "SELECT * FROM trocas_proteina WHERE user_id = ?";
     const params = [req.userId];
-    
+
     if (from && to) {
       sql += " AND date(data) BETWEEN date(?) AND date(?)";
       params.push(from, to);
     }
-    
+
     sql += " ORDER BY date(data) ASC";
     const trocas = await all(sql, params);
-    
     res.json({ ok: true, trocas });
   } catch (error) {
     console.error('Erro ao buscar trocas:', error);
