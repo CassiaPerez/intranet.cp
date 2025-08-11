@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import { Calendar, Clock, MapPin, Users, Plus, User, CheckCircle } from 'lucide-react';
+import { Calendar, Clock, Users, Plus, User } from 'lucide-react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
@@ -9,7 +9,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useGamification } from '../contexts/GamificationContext';
 
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const salas = [
   { id: 'aquario', name: 'Sala Aquário', capacity: 8, color: '#3B82F6' },
@@ -18,11 +18,21 @@ const salas = [
   { id: 'recepcao', name: 'Recepção', capacity: 4, color: '#EF4444' },
 ];
 
+// opção “Todas as salas”
+const SALAS_ALL = { id: 'all', name: 'Todas as salas', capacity: null as unknown as number, color: '#6366F1' as const };
+const salasComTodas = [SALAS_ALL, ...salas];
+
+// garante HH:MM:SS
+const toTime = (s: string) => {
+  const t = s.split('T')[1] || '';
+  return t.length === 5 ? `${t}:00` : t;
+};
+
 export const ReservaSalas: React.FC = () => {
   const { user } = useAuth();
   const { addActivity } = useGamification();
   const [activeTab, setActiveTab] = useState<'salas' | 'portaria'>('salas');
-  const [selectedRoom, setSelectedRoom] = useState<string>('aquario');
+  const [selectedRoom, setSelectedRoom] = useState<string>('all'); // mostra tudo por padrão
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,7 +55,6 @@ export const ReservaSalas: React.FC = () => {
   const [events, setEvents] = useState<any[]>([]);
   const [agendamentos, setAgendamentos] = useState<any[]>([]);
 
-  // Load reservations from database
   useEffect(() => {
     loadReservations();
     loadAgendamentos();
@@ -53,19 +62,17 @@ export const ReservaSalas: React.FC = () => {
 
   const loadReservations = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/reservas`, {
-        credentials: 'include'
-      });
-      
+      const response = await fetch(`${API_BASE}/api/reservas`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        const formattedEvents = data.reservas.map((reserva: any) => {
+        const formattedEvents = (data.reservas || []).map((reserva: any) => {
           const sala = salas.find(s => s.id === reserva.sala);
+          const norm = (time: string) => (time?.length === 5 ? `${time}:00` : time);
           return {
-            id: reserva.id.toString(),
+            id: String(reserva.id),
             title: `${reserva.assunto} - ${reserva.responsavel || 'Usuário'}`,
-            start: `${reserva.data}T${reserva.inicio}:00`,
-            end: `${reserva.data}T${reserva.fim}:00`,
+            start: `${reserva.data}T${norm(reserva.inicio)}`,
+            end: `${reserva.data}T${norm(reserva.fim)}`,
             backgroundColor: sala?.color || '#3B82F6',
             borderColor: sala?.color || '#3B82F6',
             extendedProps: {
@@ -77,6 +84,8 @@ export const ReservaSalas: React.FC = () => {
           };
         });
         setEvents(formattedEvents);
+      } else {
+        setEvents([]);
       }
     } catch (error) {
       console.error('Erro ao carregar reservas:', error);
@@ -86,10 +95,7 @@ export const ReservaSalas: React.FC = () => {
 
   const loadAgendamentos = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, {
-        credentials: 'include'
-      });
-      
+      const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setAgendamentos(data.agendamentos || []);
@@ -101,7 +107,9 @@ export const ReservaSalas: React.FC = () => {
   };
 
   // Filter events for selected room
-  const roomEvents = events.filter(event => event.extendedProps.sala === selectedRoom);
+  const roomEvents = selectedRoom === 'all'
+    ? events
+    : events.filter(event => event.extendedProps.sala === selectedRoom);
 
   const handleDateClick = (selectInfo: any) => {
     setSelectedDate(selectInfo.date);
@@ -109,9 +117,9 @@ export const ReservaSalas: React.FC = () => {
     const endDate = new Date(selectInfo.date);
     endDate.setHours(endDate.getHours() + 1);
     const endTime = endDate.toISOString().slice(0, 16);
-    
+
     setReservationData({
-      sala: selectedRoom,
+      sala: selectedRoom === 'all' ? '' : selectedRoom, // força escolher sala se “Todas”
       motivo: '',
       descricao: '',
       inicio: startTime,
@@ -123,7 +131,7 @@ export const ReservaSalas: React.FC = () => {
   const handleReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
+
     if (!reservationData.sala || !reservationData.inicio || !reservationData.fim || !reservationData.motivo) {
       toast.error('Preencha todos os campos obrigatórios!');
       setLoading(false);
@@ -133,19 +141,17 @@ export const ReservaSalas: React.FC = () => {
     try {
       const response = await fetch(`${API_BASE}/api/reservas`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           sala: reservationData.sala,
           data: reservationData.inicio.split('T')[0],
-          inicio: reservationData.inicio.split('T')[1],
-          fim: reservationData.fim.split('T')[1],
+          inicio: toTime(reservationData.inicio),
+          fim: toTime(reservationData.fim),
           assunto: reservationData.motivo
         })
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         const salaInfo = salas.find(s => s.id === reservationData.sala);
@@ -154,18 +160,13 @@ export const ReservaSalas: React.FC = () => {
           data: reservationData.inicio.split('T')[0],
           motivo: reservationData.motivo,
         });
-        
+
         toast.success(`Reserva realizada com sucesso! +${data.points || 10} pontos`);
         setShowReservationModal(false);
-        setReservationData({
-          sala: '',
-          motivo: '',
-          descricao: '',
-          inicio: '',
-          fim: '',
-        });
-        // Reload reservations to show the new one
-        loadReservations();
+        setReservationData({ sala: '', motivo: '', descricao: '', inicio: '', fim: '' });
+
+        setSelectedRoom(reservationData.sala); // destaca a sala recém-reservada
+        await loadReservations();
       } else {
         const errorData = await response.json().catch(() => ({}));
         toast.error(errorData.error || 'Erro ao criar reserva');
@@ -181,7 +182,7 @@ export const ReservaSalas: React.FC = () => {
   const handlePortariaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
+
     if (!portariaData.data || !portariaData.hora || !portariaData.visitante) {
       toast.error('Preencha todos os campos obrigatórios!');
       setLoading(false);
@@ -191,29 +192,21 @@ export const ReservaSalas: React.FC = () => {
     try {
       const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify(portariaData)
       });
-      
+
       if (response.ok) {
         const data = await response.json();
         addActivity('reception_appointment', `Agendou visita de ${portariaData.visitante}`, {
           visitante: portariaData.visitante,
           data: portariaData.data,
         });
-        
+
         toast.success(`Agendamento realizado com sucesso! +${data.points || 10} pontos`);
-        loadAgendamentos();
-        setPortariaData({
-          data: '',
-          hora: '',
-          visitante: '',
-          documento: '',
-          observacao: '',
-        });
+        await loadAgendamentos();
+        setPortariaData({ data: '', hora: '', visitante: '', documento: '', observacao: '' });
       } else {
         const errorData = await response.json().catch(() => ({}));
         toast.error(errorData.error || 'Erro ao criar agendamento');
@@ -233,7 +226,7 @@ export const ReservaSalas: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">Reserva de Espaços</h1>
           <button
             onClick={() => {
-              setReservationData({ ...reservationData, sala: selectedRoom });
+              setReservationData({ ...reservationData, sala: selectedRoom === 'all' ? '' : selectedRoom });
               setShowReservationModal(true);
             }}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
@@ -248,9 +241,7 @@ export const ReservaSalas: React.FC = () => {
           <button
             onClick={() => setActiveTab('salas')}
             className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === 'salas'
-                ? 'bg-white text-blue-600 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
+              activeTab === 'salas' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
             }`}
           >
             Salas de Reunião
@@ -258,9 +249,7 @@ export const ReservaSalas: React.FC = () => {
           <button
             onClick={() => setActiveTab('portaria')}
             className={`px-6 py-2 rounded-lg font-medium transition-colors ${
-              activeTab === 'portaria'
-                ? 'bg-white text-blue-600 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
+              activeTab === 'portaria' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'
             }`}
           >
             Agendamentos da Portaria
@@ -272,8 +261,8 @@ export const ReservaSalas: React.FC = () => {
             {/* Room Selection */}
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Selecione a Sala</h2>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                {salas.map((sala) => (
+              <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                {salasComTodas.map((sala) => (
                   <button
                     key={sala.id}
                     onClick={() => setSelectedRoom(sala.id)}
@@ -284,16 +273,15 @@ export const ReservaSalas: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center space-x-3">
-                      <div
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: sala.color }}
-                      ></div>
+                      <div className="w-4 h-4 rounded-full" style={{ backgroundColor: sala.color }}></div>
                       <div className="text-left">
                         <h3 className="font-semibold text-gray-900">{sala.name}</h3>
-                        <div className="flex items-center space-x-1 mt-1">
-                          <Users className="w-3 h-3 text-gray-400" />
-                          <span className="text-xs text-gray-500">{sala.capacity} pessoas</span>
-                        </div>
+                        {sala.id !== 'all' && (
+                          <div className="flex items-center space-x-1 mt-1">
+                            <Users className="w-3 h-3 text-gray-400" />
+                            <span className="text-xs text-gray-500">{sala.capacity} pessoas</span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -305,43 +293,39 @@ export const ReservaSalas: React.FC = () => {
             <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold text-gray-900">
-                  Calendário - {salas.find(s => s.id === selectedRoom)?.name}
+                  Calendário - {selectedRoom === 'all'
+                    ? 'Todas as salas'
+                    : salas.find(s => s.id === selectedRoom)?.name}
                 </h2>
                 <div className="flex items-center space-x-2">
                   <div
                     className="w-4 h-4 rounded-full"
-                    style={{ backgroundColor: salas.find(s => s.id === selectedRoom)?.color }}
+                    style={{ backgroundColor: (selectedRoom === 'all'
+                      ? SALAS_ALL.color
+                      : salas.find(s => s.id === selectedRoom)?.color) }}
                   ></div>
                   <span className="text-sm text-gray-600">
                     {roomEvents.length} reservas
                   </span>
                 </div>
               </div>
-              
+
               <FullCalendar
                 plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-                headerToolbar={{
-                  left: 'prev,next today',
-                  center: 'title',
-                  right: 'dayGridMonth,timeGridWeek,timeGridDay',
-                }}
+                headerToolbar={{ left: 'prev,next today', center: 'title', right: 'dayGridMonth,timeGridWeek,timeGridDay' }}
                 initialView="timeGridWeek"
                 editable={false}
-                selectable={true}
-                selectMirror={true}
-                dayMaxEvents={true}
-                weekends={true}
+                selectable
+                selectMirror
+                dayMaxEvents
+                weekends
                 events={roomEvents}
                 select={handleDateClick}
                 locale="pt-br"
                 height="600px"
                 slotMinTime="07:00:00"
                 slotMaxTime="19:00:00"
-                businessHours={{
-                  daysOfWeek: [1, 2, 3, 4, 5],
-                  startTime: '08:00',
-                  endTime: '18:00',
-                }}
+                businessHours={{ daysOfWeek: [1, 2, 3, 4, 5], startTime: '08:00', endTime: '18:00' }}
                 eventClick={(info) => {
                   toast.info(`${info.event.extendedProps.motivo} - ${info.event.extendedProps.responsavel}`);
                 }}
@@ -353,15 +337,13 @@ export const ReservaSalas: React.FC = () => {
         {activeTab === 'portaria' && (
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Agendamentos da Portaria</h2>
-            
+
             {/* Formulário de Agendamento */}
             <form onSubmit={handlePortariaSubmit} className="mb-8 p-4 border border-gray-200 rounded-lg">
               <h3 className="text-lg font-medium text-gray-900 mb-4">Novo Agendamento</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Data *
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Data *</label>
                   <input
                     type="date"
                     value={portariaData.data}
@@ -371,9 +353,7 @@ export const ReservaSalas: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Hora *
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Hora *</label>
                   <input
                     type="time"
                     value={portariaData.hora}
@@ -383,9 +363,7 @@ export const ReservaSalas: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Nome do Visitante *
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Nome do Visitante *</label>
                   <input
                     type="text"
                     value={portariaData.visitante}
@@ -396,9 +374,7 @@ export const ReservaSalas: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Documento
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Documento</label>
                   <input
                     type="text"
                     value={portariaData.documento}
@@ -408,9 +384,7 @@ export const ReservaSalas: React.FC = () => {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Observações
-                  </label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Observações</label>
                   <textarea
                     value={portariaData.observacao}
                     onChange={(e) => setPortariaData({ ...portariaData, observacao: e.target.value })}
@@ -484,9 +458,7 @@ export const ReservaSalas: React.FC = () => {
                 <h2 className="text-xl font-semibold text-gray-900 mb-6">Nova Reserva</h2>
                 <form onSubmit={handleReservation} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Sala
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Sala</label>
                     <select
                       value={reservationData.sala}
                       onChange={(e) => setReservationData({ ...reservationData, sala: e.target.value })}
@@ -504,9 +476,7 @@ export const ReservaSalas: React.FC = () => {
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Data/Hora Início
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Data/Hora Início</label>
                       <input
                         type="datetime-local"
                         value={reservationData.inicio}
@@ -516,9 +486,7 @@ export const ReservaSalas: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Data/Hora Fim
-                      </label>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Data/Hora Fim</label>
                       <input
                         type="datetime-local"
                         value={reservationData.fim}
@@ -530,9 +498,7 @@ export const ReservaSalas: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Motivo
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Motivo</label>
                     <input
                       type="text"
                       value={reservationData.motivo}
@@ -544,9 +510,7 @@ export const ReservaSalas: React.FC = () => {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Descrição (opcional)
-                    </label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Descrição (opcional)</label>
                     <textarea
                       value={reservationData.descricao}
                       onChange={(e) => setReservationData({ ...reservationData, descricao: e.target.value })}
