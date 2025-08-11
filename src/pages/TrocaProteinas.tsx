@@ -1,6 +1,6 @@
 import React, { useMemo, useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { format, startOfMonth, endOfMonth, eachDayOfInterval } from 'date-fns';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';

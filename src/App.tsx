@@ -87,6 +87,14 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/admin/*"
+                element={
+                  <ProtectedRoute requireAdmin>
+                    <AdminPanel />
+                  </ProtectedRoute>
+                }
+              />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
             <Toaster position="top-right" />

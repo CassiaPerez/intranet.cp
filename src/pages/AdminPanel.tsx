@@ -15,11 +15,11 @@ export const AdminPanel: React.FC = () => {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <nav className="flex space-x-1">
             <NavLink
-              to="/admin/"
+              to=""
               end
               className={({ isActive }) =>
                 `px-4 py-2 rounded-lg font-medium transition-colors ${
-                  (isActive || location.pathname === '/admin')
+                  (isActive || location.pathname === '/admin' || location.pathname === '/admin/')
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`
@@ -29,7 +29,7 @@ export const AdminPanel: React.FC = () => {
               Painel Geral
             </NavLink>
             <NavLink
-              to="/admin/painel-ti"
+              to="painel-ti"
               className={({ isActive }) =>
                 `px-4 py-2 rounded-lg font-medium transition-colors ${
                   isActive
@@ -42,7 +42,7 @@ export const AdminPanel: React.FC = () => {
               Painel TI
             </NavLink>
             <NavLink
-              to="/admin/painel-rh"
+              to="painel-rh"
               className={({ isActive }) =>
                 `px-4 py-2 rounded-lg font-medium transition-colors ${
                   isActive
@@ -55,7 +55,7 @@ export const AdminPanel: React.FC = () => {
               Painel RH
             </NavLink>
             <NavLink
-              to="/admin/usuarios"
+              to="usuarios"
               className={({ isActive }) =>
                 `px-4 py-2 rounded-lg font-medium transition-colors ${
                   isActive
@@ -68,7 +68,7 @@ export const AdminPanel: React.FC = () => {
               Usuários
             </NavLink>
             <NavLink
-              to="/admin/cardapio"
+              to="cardapio"
               className={({ isActive }) =>
                 `px-4 py-2 rounded-lg font-medium transition-colors ${
                   isActive

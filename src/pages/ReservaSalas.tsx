@@ -24,6 +24,7 @@ export const ReservaSalas: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'salas' | 'portaria'>('salas');
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [loading, setLoading] = useState(false);
   const [reservationData, setReservationData] = useState({
     sala: '',
     motivo: '',
@@ -78,9 +79,11 @@ export const ReservaSalas: React.FC = () => {
 
   const handleReservation = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     if (!reservationData.sala || !reservationData.inicio || !reservationData.fim || !reservationData.motivo) {
       toast.error('Preencha todos os campos obrigatórios!');
+      setLoading(false);
       return;
     }
 
@@ -127,14 +130,18 @@ export const ReservaSalas: React.FC = () => {
     } catch (error) {
       console.error('Erro ao criar reserva:', error);
       toast.error('Erro ao criar reserva');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handlePortariaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
     if (!portariaData.data || !portariaData.hora || !portariaData.visitante) {
       toast.error('Preencha todos os campos obrigatórios!');
+      setLoading(false);
       return;
     }
 
@@ -173,6 +180,8 @@ export const ReservaSalas: React.FC = () => {
     } catch (error) {
       console.error('Erro ao criar agendamento:', error);
       toast.error('Erro ao criar agendamento');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -341,9 +350,10 @@ export const ReservaSalas: React.FC = () => {
               <div className="mt-4">
                 <button
                   type="submit"
+                  disabled={loading}
                   className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
                 >
-                  Agendar Visita
+                  {loading ? 'Agendando...' : 'Agendar Visita'}
                 </button>
               </div>
             </form>
@@ -468,9 +478,10 @@ export const ReservaSalas: React.FC = () => {
                     </button>
                     <button
                       type="submit"
+                      disabled={loading}
                       className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
-                      Reservar
+                      {loading ? 'Reservando...' : 'Reservar'}
                     </button>
                   </div>
                 </form>
