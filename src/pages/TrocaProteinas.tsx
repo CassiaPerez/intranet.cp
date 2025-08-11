@@ -67,6 +67,7 @@ export const TrocaProteinas: React.FC = () => {
         toast.error('Falha ao carregar dados do cardápio.');
       }
     })();
+  }, [hoje]);
 
   // Todos os dias do mês (sempre)
   const diasDoMes = useMemo(() => {
