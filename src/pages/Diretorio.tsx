@@ -3,7 +3,7 @@ import { Layout } from '../components/Layout';
 import { Search, Phone, Mail, MapPin, Building } from 'lucide-react';
 import { useGamification } from '../contexts/GamificationContext';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 interface Employee {
   id: string;

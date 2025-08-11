@@ -4,7 +4,7 @@ import { Eye, EyeOff, Mail, Lock, Chrome } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 export const LoginPage: React.FC = () => {
   const { isAuthenticated } = useAuth();

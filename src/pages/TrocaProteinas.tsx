@@ -6,7 +6,7 @@ import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 type CardapioItem = {
   id?: string;

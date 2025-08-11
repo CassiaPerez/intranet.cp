@@ -16,7 +16,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 export const Dashboard: React.FC = () => {
   const { user } = useAuth();

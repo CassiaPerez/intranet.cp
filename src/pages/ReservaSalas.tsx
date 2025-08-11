@@ -8,7 +8,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 const salas = [
   { id: 'aquario', name: 'Sala Aquário', capacity: 8, color: '#3B82F6' },

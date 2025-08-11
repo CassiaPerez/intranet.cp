@@ -6,7 +6,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import toast from 'react-hot-toast';
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = '';
 
 interface Reaction {
   type: 'like' | 'love';
