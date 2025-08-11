@@ -22,7 +22,7 @@ const PORT = process.env.PORT || 3001;
 // Load environment variables
 require('dotenv').config();
 
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3005';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
