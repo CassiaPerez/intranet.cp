@@ -630,6 +630,23 @@ app.post('/api/portaria/agendamentos', authMiddleware, async (req, res) => {
   }
 });
 
+// Get reception appointments
+app.get('/api/portaria/agendamentos', async (req, res) => {
+  try {
+    const agendamentos = await all(`
+      SELECT p.*, u.nome as responsavel
+      FROM portaria_agendamentos p
+      LEFT JOIN usuarios u ON p.user_id = u.id
+      ORDER BY p.data DESC, p.hora DESC
+    `);
+    
+    res.json({ ok: true, agendamentos });
+  } catch (error) {
+    console.error('Erro ao buscar agendamentos:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar agendamentos' });
+  }
+});
+
 // -------------------------------------------------------------
 // Protein exchange routes
 // -------------------------------------------------------------
