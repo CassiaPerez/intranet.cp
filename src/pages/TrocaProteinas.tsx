@@ -5,6 +5,7 @@ import { ptBR } from 'date-fns/locale';
 import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
+import { useGamification } from '../contexts/GamificationContext';
 
 const API_BASE = '';
 
@@ -27,6 +28,7 @@ type Troca = {
 
 export const TrocaProteinas: React.FC = () => {
   const { user } = useAuth();
+  const { addActivity } = useGamification();
   const hoje = new Date();
   const ano = hoje.getFullYear();
   const mes = hoje.getMonth() + 1;
@@ -161,6 +163,15 @@ export const TrocaProteinas: React.FC = () => {
       }
       
       const out = await res.json();
+      
+      // Add gamification activity for each exchange
+      payload.forEach(troca => {
+        addActivity('protein_exchange', `Trocou proteína do dia ${format(parseISO(troca.data), 'dd/MM')}`, {
+          data: troca.data,
+          proteinaOriginal: troca.proteina_original,
+          proteinaNova: troca.proteina_nova,
+        });
+      });
       
       if (out.totalPoints > 0) {
         toast.success(`${out.inseridas} trocas salvas! +${out.totalPoints} pontos`);

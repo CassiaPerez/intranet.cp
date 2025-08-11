@@ -7,6 +7,7 @@ import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
+import { useGamification } from '../contexts/GamificationContext';
 
 const API_BASE = '';
 
@@ -19,6 +20,7 @@ const salas = [
 
 export const ReservaSalas: React.FC = () => {
   const { user } = useAuth();
+  const { addActivity } = useGamification();
   const [activeTab, setActiveTab] = useState<'salas' | 'portaria'>('salas');
   const [showReservationModal, setShowReservationModal] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
@@ -28,6 +30,14 @@ export const ReservaSalas: React.FC = () => {
     descricao: '',
     inicio: '',
     fim: '',
+  });
+
+  const [portariaData, setPortariaData] = useState({
+    data: '',
+    hora: '',
+    visitante: '',
+    documento: '',
+    observacao: '',
   });
 
   const [events] = useState([
@@ -69,6 +79,11 @@ export const ReservaSalas: React.FC = () => {
   const handleReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     
+    if (!reservationData.sala || !reservationData.inicio || !reservationData.fim || !reservationData.motivo) {
+      toast.error('Preencha todos os campos obrigatórios!');
+      return;
+    }
+
     try {
       const response = await fetch(`${API_BASE}/api/reservas`, {
         method: 'POST',
@@ -87,6 +102,11 @@ export const ReservaSalas: React.FC = () => {
       
       if (response.ok) {
         const data = await response.json();
+        addActivity('room_reservation', `Reservou ${reservationData.sala} para ${reservationData.motivo}`, {
+          sala: reservationData.sala,
+          data: reservationData.inicio.split('T')[0],
+          motivo: reservationData.motivo,
+        });
         if (data.points) {
           toast.success(`Reserva realizada com sucesso! +${data.points} pontos`);
         } else {
@@ -107,6 +127,52 @@ export const ReservaSalas: React.FC = () => {
     } catch (error) {
       console.error('Erro ao criar reserva:', error);
       toast.error('Erro ao criar reserva');
+    }
+  };
+
+  const handlePortariaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!portariaData.data || !portariaData.hora || !portariaData.visitante) {
+      toast.error('Preencha todos os campos obrigatórios!');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify(portariaData)
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        addActivity('reception_appointment', `Agendou visita de ${portariaData.visitante}`, {
+          visitante: portariaData.visitante,
+          data: portariaData.data,
+        });
+        if (data.points) {
+          toast.success(`Agendamento realizado com sucesso! +${data.points} pontos`);
+        } else {
+          toast.success('Agendamento realizado com sucesso!');
+        }
+        setPortariaData({
+          data: '',
+          hora: '',
+          visitante: '',
+          documento: '',
+          observacao: '',
+        });
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao criar agendamento');
+      }
+    } catch (error) {
+      console.error('Erro ao criar agendamento:', error);
+      toast.error('Erro ao criar agendamento');
     }
   };
 
@@ -205,6 +271,84 @@ export const ReservaSalas: React.FC = () => {
         {activeTab === 'portaria' && (
           <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
             <h2 className="text-xl font-semibold text-gray-900 mb-6">Agendamentos da Portaria</h2>
+            
+            {/* Formulário de Agendamento */}
+            <form onSubmit={handlePortariaSubmit} className="mb-8 p-4 border border-gray-200 rounded-lg">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">Novo Agendamento</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Data
+                  </label>
+                  <input
+                    type="date"
+                    value={portariaData.data}
+                    onChange={(e) => setPortariaData({ ...portariaData, data: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Hora
+                  </label>
+                  <input
+                    type="time"
+                    value={portariaData.hora}
+                    onChange={(e) => setPortariaData({ ...portariaData, hora: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Nome do Visitante
+                  </label>
+                  <input
+                    type="text"
+                    value={portariaData.visitante}
+                    onChange={(e) => setPortariaData({ ...portariaData, visitante: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Nome completo do visitante"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Documento
+                  </label>
+                  <input
+                    type="text"
+                    value={portariaData.documento}
+                    onChange={(e) => setPortariaData({ ...portariaData, documento: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="RG, CPF ou outro documento"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Observações
+                  </label>
+                  <textarea
+                    value={portariaData.observacao}
+                    onChange={(e) => setPortariaData({ ...portariaData, observacao: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    rows={3}
+                    placeholder="Informações adicionais sobre a visita..."
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  Agendar Visita
+                </button>
+              </div>
+            </form>
+
+            {/* Lista de Agendamentos */}
             <div className="space-y-4">
               <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
                 <div className="flex items-center space-x-4">

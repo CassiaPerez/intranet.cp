@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { Routes, Route, NavLink } from 'react-router-dom';
+import { Routes, Route, NavLink, useLocation } from 'react-router-dom';
 import { Layout } from '../components/Layout';
 import { Settings, Monitor, Users, UserPlus, UserMinus, Edit, UtensilsCrossed, Download } from 'lucide-react';
 
 export const AdminPanel: React.FC = () => {
+  const location = useLocation();
+  
   return (
     <Layout>
       <div className="space-y-6">
@@ -13,11 +15,11 @@ export const AdminPanel: React.FC = () => {
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <nav className="flex space-x-1">
             <NavLink
-              to="/admin"
+              to="/admin/"
               end
               className={({ isActive }) =>
                 `px-4 py-2 rounded-lg font-medium transition-colors ${
-                  isActive
+                  (isActive || location.pathname === '/admin')
                     ? 'bg-blue-100 text-blue-700'
                     : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
                 }`
@@ -83,11 +85,11 @@ export const AdminPanel: React.FC = () => {
 
         {/* Admin Content */}
         <Routes>
-          <Route path="/" element={<AdminDashboard />} />
-          <Route path="/painel-ti" element={<ITPanel />} />
-          <Route path="/painel-rh" element={<HRPanel />} />
-          <Route path="/usuarios" element={<UserManagement />} />
-          <Route path="/cardapio" element={<MenuManagement />} />
+          <Route index element={<AdminDashboard />} />
+          <Route path="painel-ti" element={<ITPanel />} />
+          <Route path="painel-rh" element={<HRPanel />} />
+          <Route path="usuarios" element={<UserManagement />} />
+          <Route path="cardapio" element={<MenuManagement />} />
         </Routes>
       </div>
     </Layout>
