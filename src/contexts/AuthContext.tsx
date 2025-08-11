@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-const API_BASE = 'https://localhost:3001';
+const API_BASE = 'http://localhost:3001';
 
 interface User {
   id: string;
