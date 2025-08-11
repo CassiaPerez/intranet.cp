@@ -11,8 +11,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   children,
   requireAdmin = false
 }) => {
-  const { isAuthenticated, loading } = useAuth();
-  const { user } = useAuth();
+  const { isAuthenticated, loading, user } = useAuth();
 
   if (loading) {
     return (
