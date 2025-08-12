@@ -13,6 +13,8 @@ const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const jwt = require('jsonwebtoken');
 const cookieParser = require('cookie-parser');
+const bcrypt = require('bcryptjs');
+const multer = require('multer');
 const { format, parseISO } = require('date-fns');
 const { ptBR } = require('date-fns/locale');
 
@@ -37,6 +39,9 @@ const POINTS = {
   PORTARIA_CREATE: 10,
   TROCA_PROTEINA: 5
 };
+
+// Configure multer for file uploads
+const upload = multer({ dest: 'uploads/' });
 
 // -------------------------------------------------------------
 // Middleware setup
@@ -114,6 +119,22 @@ async function createSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
+    // Add new columns to usuarios table (idempotent)
+    const usuariosInfo = await all("PRAGMA table_info(usuarios)");
+    const hasRole = usuariosInfo.some(col => col.name === 'role');
+    const hasAtivo = usuariosInfo.some(col => col.name === 'ativo');
+    const hasSenhaHash = usuariosInfo.some(col => col.name === 'senha_hash');
+    
+    if (!hasRole) {
+      await run("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'colaborador'");
+    }
+    if (!hasAtivo) {
+      await run("ALTER TABLE usuarios ADD COLUMN ativo INTEGER DEFAULT 1");
+    }
+    if (!hasSenhaHash) {
+      await run("ALTER TABLE usuarios ADD COLUMN senha_hash TEXT");
+    }
+
     // Points ledger
     await run(`CREATE TABLE IF NOT EXISTS pontos(
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +143,37 @@ async function createSchema() {
       pontos INTEGER NOT NULL,
       meta TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // TI Requests table
+    await run(`CREATE TABLE IF NOT EXISTS ti_solicitacoes(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      titulo TEXT NOT NULL,
+      descricao TEXT,
+      status TEXT DEFAULT 'pendente',
+      solicitante_id INTEGER NOT NULL,
+      responsavel_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
+
+    // System settings table
+    await run(`CREATE TABLE IF NOT EXISTS system_settings(
+      chave TEXT PRIMARY KEY,
+      valor TEXT
+    )`);
+
+    // Cardapio table (optional)
+    await run(`CREATE TABLE IF NOT EXISTS cardapio(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      data DATE NOT NULL,
+      tipo TEXT CHECK(tipo IN ('padrao','light')) NOT NULL,
+      proteina TEXT, 
+      prato TEXT, 
+      descricao TEXT,
+      acompanhamentos TEXT, 
+      sobremesa TEXT,
+      UNIQUE(data,tipo)
     )`);
 
     // Mural tables
@@ -200,6 +252,21 @@ async function createSchema() {
 createSchema();
 
 // -------------------------------------------------------------
+// Role-based middleware
+// -------------------------------------------------------------
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Não autenticado' });
+    }
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ ok: false, error: 'Acesso negado' });
+    }
+    next();
+  };
+}
+
+// -------------------------------------------------------------
 // Points system helper
 // -------------------------------------------------------------
 async function registrarPontos(user_id, acao, pontos, meta = null) {
@@ -269,15 +336,15 @@ function authMiddleware(req, res, next) {
 async function getUserMiddleware(req, res, next) {
   if (!req.userId) req.userId = 1;
   try {
-    const user = await get("SELECT * FROM usuarios WHERE id = ?", [req.userId]);
+    const user = await get("SELECT * FROM usuarios WHERE id = ? AND ativo = 1", [req.userId]);
     if (!user) {
-      req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral' };
+      req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral', role: 'colaborador' };
       return next();
     }
     req.user = user;
     next();
   } catch {
-    req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral' };
+    req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral', role: 'colaborador' };
     next();
   }
 }
@@ -317,21 +384,37 @@ app.post('/auth/login', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ ok: false, error: 'Email e senha são obrigatórios' });
 
-    const users = [
-      { id: 1, email: 'admin@grupocropfield.com.br', password: 'admin123', nome: 'Administrador', setor: 'TI' },
-      { id: 2, email: 'rh@grupocropfield.com.br', password: 'rh123', nome: 'RH Manager', setor: 'RH' },
-      { id: 3, email: 'user@grupocropfield.com.br', password: 'user123', nome: 'Usuário Teste', setor: 'Geral' },
-    ];
-    const user = users.find(u => u.email === email && u.password === password);
-    if (!user) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
-
-    let dbUser = await get("SELECT * FROM usuarios WHERE email = ?", [email]);
+    let dbUser = await get("SELECT * FROM usuarios WHERE email = ? AND ativo = 1", [email]);
     if (!dbUser) {
+      // Demo users fallback
+      const demoUsers = [
+        { id: 1, email: 'admin@grupocropfield.com.br', password: 'admin123', nome: 'Administrador', setor: 'TI', role: 'admin' },
+        { id: 2, email: 'rh@grupocropfield.com.br', password: 'rh123', nome: 'RH Manager', setor: 'RH', role: 'rh' },
+        { id: 3, email: 'user@grupocropfield.com.br', password: 'user123', nome: 'Usuário Teste', setor: 'Geral', role: 'colaborador' },
+      ];
+      const demoUser = demoUsers.find(u => u.email === email && u.password === password);
+      if (!demoUser) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+      
       const result = await run(
-        "INSERT INTO usuarios(email, nome, setor) VALUES(?, ?, ?)",
-        [user.email, user.nome, user.setor]
+        "INSERT INTO usuarios(email, nome, setor, role) VALUES(?, ?, ?, ?)",
+        [demoUser.email, demoUser.nome, demoUser.setor, demoUser.role]
       );
-      dbUser = { id: result.lastID, email: user.email, nome: user.nome, setor: user.setor };
+      dbUser = { id: result.lastID, email: demoUser.email, nome: demoUser.nome, setor: demoUser.setor, role: demoUser.role };
+    }
+    
+    // Check password hash if exists
+    if (dbUser.senha_hash) {
+      const isValid = await bcrypt.compare(password, dbUser.senha_hash);
+      if (!isValid) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+    } else {
+      // Demo fallback
+      const demoUsers = [
+        { email: 'admin@grupocropfield.com.br', password: 'admin123' },
+        { email: 'rh@grupocropfield.com.br', password: 'rh123' },
+        { email: 'user@grupocropfield.com.br', password: 'user123' },
+      ];
+      const demoMatch = demoUsers.find(u => u.email === email && u.password === password);
+      if (!demoMatch) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
     }
 
     const token = jwt.sign({ sub: dbUser.id }, JWT_SECRET, { expiresIn: '7d' });
@@ -343,7 +426,7 @@ app.post('/auth/login', async (req, res) => {
     });
 
     res.json({ ok: true, message: 'Login realizado com sucesso',
-      user: { id: dbUser.id, email: dbUser.email, nome: dbUser.nome, setor: dbUser.setor }});
+      user: { id: dbUser.id, email: dbUser.email, nome: dbUser.nome, setor: dbUser.setor, role: dbUser.role || 'colaborador' }});
   } catch (error) {
     console.error('Erro no login manual:', error);
     res.status(500).json({ ok: false, error: 'Erro interno do servidor' });
@@ -358,7 +441,7 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, message: 'Server runn
 // Get current user
 app.get('/api/me', authMiddleware, getUserMiddleware, (req, res) => {
   res.json({ ok: true, user: {
-    id: req.user.id, name: req.user.nome, email: req.user.email, sector: req.user.setor, avatar: req.user.foto
+    id: req.user.id, name: req.user.nome, email: req.user.email, sector: req.user.setor, avatar: req.user.foto, role: req.user.role || 'colaborador'
   }});
 });
 
@@ -424,6 +507,476 @@ app.get('/api/pontos/ranking', async (_req, res) => {
   } catch (error) {
     console.error('Erro ao buscar ranking:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar ranking' });
+  }
+});
+
+// -------------------------------------------------------------
+// ADMIN ROUTES
+// -------------------------------------------------------------
+
+// Users management
+app.get('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const users = await all(`
+      SELECT u.id, u.nome, u.email, u.setor, u.role, u.ativo, u.created_at,
+             COALESCE(SUM(p.pontos), 0) as total_pontos_mensal
+      FROM usuarios u
+      LEFT JOIN pontos p ON u.id = p.user_id 
+        AND strftime('%Y-%m', p.created_at) = strftime('%Y-%m', 'now')
+      GROUP BY u.id
+      ORDER BY u.created_at DESC
+    `);
+    res.json({ ok: true, users });
+  } catch (error) {
+    console.error('Erro ao buscar usuários:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar usuários' });
+  }
+});
+
+app.post('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const { nome, email, setor, role, senha } = req.body;
+    if (!nome || !email || !senha) {
+      return res.status(400).json({ ok: false, error: 'Nome, email e senha são obrigatórios' });
+    }
+
+    // Check if user exists
+    const existing = await get("SELECT id FROM usuarios WHERE email = ?", [email]);
+    if (existing) {
+      return res.status(400).json({ ok: false, error: 'Email já está em uso' });
+    }
+
+    const senhaHash = await bcrypt.hash(senha, 10);
+    const result = await run(
+      "INSERT INTO usuarios(nome, email, setor, role, senha_hash, ativo) VALUES(?, ?, ?, ?, ?, 1)",
+      [nome, email, setor || 'Geral', role || 'colaborador', senhaHash]
+    );
+
+    res.json({ ok: true, id: result.lastID });
+  } catch (error) {
+    console.error('Erro ao criar usuário:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao criar usuário' });
+  }
+});
+
+app.patch('/api/admin/users/:id', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const { nome, email, setor, role, ativo } = req.body;
+    const userId = req.params.id;
+
+    const updates = [];
+    const values = [];
+
+    if (nome !== undefined) { updates.push('nome = ?'); values.push(nome); }
+    if (email !== undefined) { updates.push('email = ?'); values.push(email); }
+    if (setor !== undefined) { updates.push('setor = ?'); values.push(setor); }
+    if (role !== undefined) { updates.push('role = ?'); values.push(role); }
+    if (ativo !== undefined) { updates.push('ativo = ?'); values.push(ativo); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+    }
+
+    values.push(userId);
+    await run(`UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`, values);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao atualizar usuário:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar usuário' });
+  }
+});
+
+app.patch('/api/admin/users/:id/password', authMiddleware, getUserMiddleware, async (req, res) => {
+  try {
+    const { senha } = req.body;
+    const userId = req.params.id;
+
+    if (!senha) {
+      return res.status(400).json({ ok: false, error: 'Senha é obrigatória' });
+    }
+
+    // Admin can change anyone's password, users can change their own
+    if (req.user.role !== 'admin' && req.user.id !== parseInt(userId)) {
+      return res.status(403).json({ ok: false, error: 'Acesso negado' });
+    }
+
+    const senhaHash = await bcrypt.hash(senha, 10);
+    await run("UPDATE usuarios SET senha_hash = ? WHERE id = ?", [senhaHash, userId]);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao atualizar senha:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar senha' });
+  }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const userId = req.params.id;
+    await run("UPDATE usuarios SET ativo = 0 WHERE id = ?", [userId]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao desativar usuário:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao desativar usuário' });
+  }
+});
+
+// System settings
+app.get('/api/admin/config', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const settings = await all("SELECT chave, valor FROM system_settings");
+    const config = {};
+    settings.forEach(s => {
+      try {
+        config[s.chave] = JSON.parse(s.valor);
+      } catch {
+        config[s.chave] = s.valor;
+      }
+    });
+    res.json({ ok: true, config });
+  } catch (error) {
+    console.error('Erro ao buscar configurações:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar configurações' });
+  }
+});
+
+app.put('/api/admin/config', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
+  try {
+    const config = req.body;
+    for (const [chave, valor] of Object.entries(config)) {
+      await run(
+        "INSERT OR REPLACE INTO system_settings(chave, valor) VALUES(?, ?)",
+        [chave, JSON.stringify(valor)]
+      );
+    }
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao salvar configurações:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao salvar configurações' });
+  }
+});
+
+// Reports/Export endpoints
+app.get('/api/admin/export/trocas.csv', authMiddleware, getUserMiddleware, requireRole('admin', 'rh'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let sql = `
+      SELECT t.*, u.nome as usuario_nome, u.email as usuario_email, u.setor as usuario_setor
+      FROM trocas_proteina t
+      JOIN usuarios u ON t.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (from) { sql += " AND date(t.data) >= date(?)"; params.push(from); }
+    if (to) { sql += " AND date(t.data) <= date(?)"; params.push(to); }
+    
+    sql += " ORDER BY t.data ASC";
+    
+    const trocas = await all(sql, params);
+    
+    let csv = 'Data,Dia,Proteina Original,Proteina Nova,Usuario,Email,Setor,Data Criacao\n';
+    trocas.forEach(t => {
+      csv += `"${t.data}","${t.dia}","${t.proteina_original}","${t.proteina_nova}","${t.usuario_nome}","${t.usuario_email}","${t.usuario_setor}","${t.created_at}"\n`;
+    });
+    
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=trocas-${from || 'all'}-${to || 'all'}.csv`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Erro ao exportar trocas:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao exportar trocas' });
+  }
+});
+
+app.get('/api/admin/export/ranking.csv', authMiddleware, getUserMiddleware, requireRole('admin', 'rh'), async (req, res) => {
+  try {
+    const { month } = req.query; // YYYY-MM
+    const yearMonth = month || format(new Date(), 'yyyy-MM');
+    
+    const ranking = await all(`
+      SELECT u.nome, u.email, u.setor, SUM(p.pontos) as total_pontos,
+             COUNT(p.id) as total_atividades
+      FROM pontos p
+      JOIN usuarios u ON p.user_id = u.id
+      WHERE strftime('%Y-%m', p.created_at) = ?
+      GROUP BY u.id, u.nome, u.email, u.setor
+      ORDER BY total_pontos DESC
+    `, [yearMonth]);
+    
+    let csv = 'Posicao,Nome,Email,Setor,Total Pontos,Total Atividades\n';
+    ranking.forEach((r, index) => {
+      csv += `${index + 1},"${r.nome}","${r.email}","${r.setor}",${r.total_pontos},${r.total_atividades}\n`;
+    });
+    
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=ranking-${yearMonth}.csv`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Erro ao exportar ranking:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao exportar ranking' });
+  }
+});
+
+app.get('/api/admin/export/portaria.csv', authMiddleware, getUserMiddleware, requireRole('admin', 'rh'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let sql = `
+      SELECT p.*, u.nome as responsavel_nome, u.email as responsavel_email
+      FROM portaria_agendamentos p
+      LEFT JOIN usuarios u ON p.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (from) { sql += " AND date(p.data) >= date(?)"; params.push(from); }
+    if (to) { sql += " AND date(p.data) <= date(?)"; params.push(to); }
+    
+    sql += " ORDER BY p.data DESC";
+    
+    const agendamentos = await all(sql, params);
+    
+    let csv = 'Data,Hora,Visitante,Documento,Responsavel,Email Responsavel,Observacao,Data Criacao\n';
+    agendamentos.forEach(a => {
+      csv += `"${a.data}","${a.hora}","${a.visitante}","${a.documento || ''}","${a.responsavel_nome || ''}","${a.responsavel_email || ''}","${a.observacao || ''}","${a.created_at}"\n`;
+    });
+    
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=portaria-${from || 'all'}-${to || 'all'}.csv`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Erro ao exportar portaria:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao exportar portaria' });
+  }
+});
+
+app.get('/api/admin/export/reservas.csv', authMiddleware, getUserMiddleware, requireRole('admin', 'rh'), async (req, res) => {
+  try {
+    const { from, to } = req.query;
+    let sql = `
+      SELECT r.*, u.nome as responsavel_nome, u.email as responsavel_email
+      FROM reservas r
+      LEFT JOIN usuarios u ON r.user_id = u.id
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (from) { sql += " AND date(r.data) >= date(?)"; params.push(from); }
+    if (to) { sql += " AND date(r.data) <= date(?)"; params.push(to); }
+    
+    sql += " ORDER BY r.data ASC";
+    
+    const reservas = await all(sql, params);
+    
+    let csv = 'Data,Sala,Horario Inicio,Horario Fim,Assunto,Responsavel,Email Responsavel,Data Criacao\n';
+    reservas.forEach(r => {
+      csv += `"${r.data}","${r.sala}","${r.inicio}","${r.fim}","${r.assunto}","${r.responsavel_nome || ''}","${r.responsavel_email || ''}","${r.created_at}"\n`;
+    });
+    
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename=reservas-${from || 'all'}-${to || 'all'}.csv`);
+    res.send(csv);
+  } catch (error) {
+    console.error('Erro ao exportar reservas:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao exportar reservas' });
+  }
+});
+
+// -------------------------------------------------------------
+// TI PANEL ROUTES
+// -------------------------------------------------------------
+app.post('/api/ti/solicitacoes', authMiddleware, getUserMiddleware, async (req, res) => {
+  try {
+    const { titulo, descricao } = req.body;
+    if (!titulo) {
+      return res.status(400).json({ ok: false, error: 'Título é obrigatório' });
+    }
+
+    const result = await run(
+      "INSERT INTO ti_solicitacoes(titulo, descricao, solicitante_id) VALUES(?, ?, ?)",
+      [titulo, descricao, req.userId]
+    );
+
+    res.json({ ok: true, id: result.lastID });
+  } catch (error) {
+    console.error('Erro ao criar solicitação TI:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao criar solicitação TI' });
+  }
+});
+
+app.get('/api/ti/solicitacoes', authMiddleware, getUserMiddleware, requireRole('ti', 'admin'), async (req, res) => {
+  try {
+    const { status } = req.query;
+    let sql = `
+      SELECT s.*, 
+             us.nome as solicitante_nome, us.email as solicitante_email,
+             ur.nome as responsavel_nome, ur.email as responsavel_email
+      FROM ti_solicitacoes s
+      JOIN usuarios us ON s.solicitante_id = us.id
+      LEFT JOIN usuarios ur ON s.responsavel_id = ur.id
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (status) { sql += " AND s.status = ?"; params.push(status); }
+    
+    sql += " ORDER BY s.created_at DESC";
+    
+    const solicitacoes = await all(sql, params);
+    res.json({ ok: true, solicitacoes });
+  } catch (error) {
+    console.error('Erro ao buscar solicitações TI:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar solicitações TI' });
+  }
+});
+
+app.patch('/api/ti/solicitacoes/:id', authMiddleware, getUserMiddleware, requireRole('ti', 'admin'), async (req, res) => {
+  try {
+    const { status } = req.body;
+    const solicitacaoId = req.params.id;
+
+    if (!['pendente', 'aprovado', 'reprovado'].includes(status)) {
+      return res.status(400).json({ ok: false, error: 'Status inválido' });
+    }
+
+    await run(
+      "UPDATE ti_solicitacoes SET status = ?, responsavel_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+      [status, req.userId, solicitacaoId]
+    );
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao atualizar solicitação TI:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar solicitação TI' });
+  }
+});
+
+app.get('/api/ti/minhas', authMiddleware, getUserMiddleware, async (req, res) => {
+  try {
+    const solicitacoes = await all(`
+      SELECT s.*, ur.nome as responsavel_nome
+      FROM ti_solicitacoes s
+      LEFT JOIN usuarios ur ON s.responsavel_id = ur.id
+      WHERE s.solicitante_id = ?
+      ORDER BY s.created_at DESC
+    `, [req.userId]);
+    
+    res.json({ ok: true, solicitacoes });
+  } catch (error) {
+    console.error('Erro ao buscar minhas solicitações:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar minhas solicitações' });
+  }
+});
+
+// -------------------------------------------------------------
+// RH PANEL ROUTES (Mural management)
+// -------------------------------------------------------------
+app.post('/api/rh/mural/posts', authMiddleware, getUserMiddleware, requireRole('rh', 'admin'), async (req, res) => {
+  try {
+    const { titulo, conteudo, pinned } = req.body;
+    if (!titulo || !conteudo) {
+      return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
+    }
+
+    const result = await run(
+      "INSERT INTO mural_posts(titulo, conteudo, author, pinned) VALUES(?, ?, ?, ?)",
+      [titulo, conteudo, req.user.nome, pinned ? 1 : 0]
+    );
+
+    res.json({ ok: true, id: result.lastID });
+  } catch (error) {
+    console.error('Erro ao criar post:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao criar post' });
+  }
+});
+
+app.patch('/api/rh/mural/posts/:id', authMiddleware, getUserMiddleware, requireRole('rh', 'admin'), async (req, res) => {
+  try {
+    const { titulo, conteudo, pinned } = req.body;
+    const postId = req.params.id;
+
+    const updates = [];
+    const values = [];
+
+    if (titulo !== undefined) { updates.push('titulo = ?'); values.push(titulo); }
+    if (conteudo !== undefined) { updates.push('conteudo = ?'); values.push(conteudo); }
+    if (pinned !== undefined) { updates.push('pinned = ?'); values.push(pinned ? 1 : 0); }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+    }
+
+    values.push(postId);
+    await run(`UPDATE mural_posts SET ${updates.join(', ')} WHERE id = ?`, values);
+
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao atualizar post:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao atualizar post' });
+  }
+});
+
+app.delete('/api/rh/mural/posts/:id', authMiddleware, getUserMiddleware, requireRole('rh', 'admin'), async (req, res) => {
+  try {
+    const postId = req.params.id;
+    await run("DELETE FROM mural_posts WHERE id = ?", [postId]);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Erro ao deletar post:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao deletar post' });
+  }
+});
+
+// -------------------------------------------------------------
+// CARDAPIO ROUTES
+// -------------------------------------------------------------
+app.post('/api/admin/cardapio/import', authMiddleware, getUserMiddleware, requireRole('admin', 'rh'), async (req, res) => {
+  try {
+    const { mes, tipo, dados } = req.body; // mes: 'YYYY-MM', tipo: 'padrao'|'light', dados: CardapioItem[]
+    
+    if (!mes || !tipo || !dados) {
+      return res.status(400).json({ ok: false, error: 'Mês, tipo e dados são obrigatórios' });
+    }
+    
+    if (!['padrao', 'light'].includes(tipo)) {
+      return res.status(400).json({ ok: false, error: 'Tipo deve ser padrao ou light' });
+    }
+    
+    // Save to file
+    const fileName = `cardapio-${mes.replace('-', '')}-${tipo}.json`;
+    const filePath = path.join(__dirname, 'public', 'cardapio', fileName);
+    
+    // Ensure directory exists
+    const cardapioDir = path.join(__dirname, 'public', 'cardapio');
+    if (!fs.existsSync(cardapioDir)) {
+      fs.mkdirSync(cardapioDir, { recursive: true });
+    }
+    
+    fs.writeFileSync(filePath, JSON.stringify(dados, null, 2), 'utf8');
+    
+    res.json({ ok: true, message: `Cardápio ${tipo} de ${mes} importado com sucesso`, fileName });
+  } catch (error) {
+    console.error('Erro ao importar cardápio:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao importar cardápio' });
+  }
+});
+
+app.get('/api/cardapio/:mes/:tipo', async (req, res) => {
+  try {
+    const { mes, tipo } = req.params;
+    const fileName = `cardapio-${mes}-${tipo}.json`;
+    const filePath = path.join(__dirname, 'public', 'cardapio', fileName);
+    
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ ok: false, error: 'Cardápio não encontrado' });
+    }
+    
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    res.json({ ok: true, cardapio: data });
+  } catch (error) {
+    console.error('Erro ao buscar cardápio:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao buscar cardápio' });
   }
 });
 
