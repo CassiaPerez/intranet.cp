@@ -115,10 +115,9 @@ export const TrocaProteinas: React.FC = () => {
   // Alterar uma linha
   const handleChange = (dataISO: string, nova: string) => {
     const original = originalByDate[dataISO] || ''; // vazio se não houver cardápio naquele dia
-    const normalizedNova = nova ? normalizeProtein(nova) : nova;
-    const normalizedOriginal = original ? normalizeProtein(original) : original;
-    // Se igual à original (ou vazio), limpamos (não enviaremos essa linha)
-    if (!normalizedNova || normalizedNova === normalizedOriginal) {
+    
+    // Se o usuário escolheu vazio (manter original), removemos a troca
+    if (!nova || nova === ORIGINAL_SENTINEL) {
       setTrocas(prev => {
         const copy = { ...prev };
         delete copy[dataISO];
@@ -126,7 +125,24 @@ export const TrocaProteinas: React.FC = () => {
       });
       return;
     }
-    setTrocas(prev => ({ ...prev, [dataISO]: { data: dataISO, proteina_original: original, proteina_nova: normalizedNova } }));
+    
+    // Garantir que a nova proteína está nas opções válidas
+    if (!PROTEIN_OPTIONS.includes(nova as ProteinLabel)) {
+      return; // Ignorar valores inválidos
+    }
+    
+    // Se igual à original, não precisamos da troca, mas vamos manter no state para exibir
+    const normalizedOriginal = normalizeProtein(original);
+    if (nova === normalizedOriginal) {
+      setTrocas(prev => {
+        const copy = { ...prev };
+        delete copy[dataISO];
+        return copy;
+      });
+      return;
+    }
+    
+    setTrocas(prev => ({ ...prev, [dataISO]: { data: dataISO, proteina_original: original, proteina_nova: nova } }));
   };
 
   // Aplicar para todos os dias disponíveis (com cardápio)
