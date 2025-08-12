@@ -13,7 +13,6 @@ const NAV: NavItem[] = [
   { to: '/equipamentos', label: 'Equipamentos', adminOnly: true },
   { to: '/mural', label: 'Mural' },
   { to: '/admin', label: 'Painel', adminOnly: true },
-  { to: '/painel', label: 'Painel Admin', adminOnly: true },
 ];
 
 function SidebarImpl() {
