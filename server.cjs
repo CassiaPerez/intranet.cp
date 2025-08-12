@@ -119,7 +119,7 @@ async function createSchema() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 
-    // Add new columns to usuarios table (idempotent)
+    // Add new columns to usuarios table (idempotent) - ADMIN PANEL REQUIREMENTS
     const usuariosInfo = await all("PRAGMA table_info(usuarios)");
     const hasRole = usuariosInfo.some(col => col.name === 'role');
     const hasAtivo = usuariosInfo.some(col => col.name === 'ativo');
@@ -127,12 +127,15 @@ async function createSchema() {
     
     if (!hasRole) {
       await run("ALTER TABLE usuarios ADD COLUMN role TEXT DEFAULT 'colaborador'");
+      console.log('Added role column to usuarios table');
     }
     if (!hasAtivo) {
       await run("ALTER TABLE usuarios ADD COLUMN ativo INTEGER DEFAULT 1");
+      console.log('Added ativo column to usuarios table');
     }
     if (!hasSenhaHash) {
       await run("ALTER TABLE usuarios ADD COLUMN senha_hash TEXT");
+      console.log('Added senha_hash column to usuarios table');
     }
 
     // Points ledger
@@ -258,6 +261,10 @@ function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({ ok: false, error: 'Não autenticado' });
+    }
+    // Admin has access to everything
+    if (req.user.role === 'admin') {
+      return next();
     }
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({ ok: false, error: 'Acesso negado' });
@@ -441,7 +448,13 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, message: 'Server runn
 // Get current user
 app.get('/api/me', authMiddleware, getUserMiddleware, (req, res) => {
   res.json({ ok: true, user: {
-    id: req.user.id, name: req.user.nome, email: req.user.email, sector: req.user.setor, avatar: req.user.foto, role: req.user.role || 'colaborador'
+    id: req.user.id, 
+    name: req.user.nome, 
+    email: req.user.email, 
+    sector: req.user.setor, 
+    avatar: req.user.foto, 
+    role: req.user.role || 'colaborador',
+    active: req.user.ativo !== 0
   }});
 });
 

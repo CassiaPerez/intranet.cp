@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Layout } from '../components/Layout';
 import { 
   Users, 
@@ -15,7 +15,9 @@ import {
   Eye,
   CheckCircle,
   XCircle,
-  Clock
+  Clock,
+  AlertCircle,
+  Calendar
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
@@ -56,14 +58,39 @@ interface MuralPost {
 
 export const Painel: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('usuarios');
+  const [activeTab, setActiveTab] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Check user role and redirect if not authorized
+  // User role checks
   const isAdmin = user?.role === 'admin';
   const isRH = user?.role === 'rh' || user?.role === 'admin';
   const isTI = user?.role === 'ti' || user?.role === 'admin';
   const hasAccess = isAdmin || isRH || isTI;
+
+  // Available tabs based on user role
+  const availableTabs = useMemo(() => {
+    const tabs = [];
+    if (isAdmin) {
+      tabs.push('usuarios', 'relatorios', 'config');
+    }
+    if (isRH) {
+      tabs.push('relatorios', 'mural', 'cardapio');
+    }
+    if (isTI) {
+      tabs.push('relatorios', 'ti');
+    }
+    if (hasAccess && !isAdmin && !isRH && !isTI) {
+      tabs.push('minhas-solicitacoes');
+    }
+    return [...new Set(tabs)]; // Remove duplicates
+  }, [isAdmin, isRH, isTI, hasAccess]);
+
+  // Set initial active tab
+  useEffect(() => {
+    if (availableTabs.length > 0 && !activeTab) {
+      setActiveTab(availableTabs[0]);
+    }
+  }, [availableTabs, activeTab]);
 
   // Users management state
   const [users, setUsers] = useState<User[]>([]);
@@ -102,11 +129,12 @@ export const Painel: React.FC = () => {
   });
 
   useEffect(() => {
-    if (hasAccess) {
+    if (hasAccess && activeTab) {
       if (activeTab === 'usuarios' && isAdmin) loadUsers();
       if (activeTab === 'ti' && isTI) loadTISolicitacoes();
       if (activeTab === 'mural' && isRH) loadMuralPosts();
       if (activeTab === 'config' && isAdmin) loadConfig();
+      if (activeTab === 'minhas-solicitacoes') loadMinhasSolicitacoes();
     }
   }, [activeTab, hasAccess, isAdmin, isTI, isRH]);
 
@@ -446,21 +474,29 @@ export const Painel: React.FC = () => {
     }
   };
 
-  const exportReport = (type: string) => {
-    const baseUrl = `${API_BASE}/api/admin/export/${type}.csv`;
-    const today = new Date();
-    const thisMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+  const exportReport = (type: string, fromDate?: string, toDate?: string) => {
+    let url = `${API_BASE}/api/admin/export/${type}.csv`;
     
-    let url = baseUrl;
     if (type === 'ranking') {
-      url += `?month=${thisMonth}`;
-    } else {
-      const fromDate = `${thisMonth}-01`;
-      const toDate = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+      const month = fromDate || (new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'));
+      url += `?month=${month}`;
+    } else if (fromDate && toDate) {
       url += `?from=${fromDate}&to=${toDate}`;
+    } else {
+      // Default to current month
+      const today = new Date();
+      const thisMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+      const fromDefault = `${thisMonth}-01`;
+      const toDefault = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+      url += `?from=${fromDefault}&to=${toDefault}`;
     }
     
-    window.open(url, '_blank');
+    try {
+      window.open(url, '_blank');
+      toast.success('Relatório sendo exportado...');
+    } catch (error) {
+      toast.error('Erro ao exportar relatório');
+    }
   };
 
   if (!hasAccess) {
@@ -468,10 +504,20 @@ export const Painel: React.FC = () => {
       <Layout>
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <Settings className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-900 mb-2">Acesso Restrito</h2>
             <p className="text-gray-600">Você não tem permissão para acessar este painel.</p>
           </div>
+        </div>
+      </Layout>
+    );
+  }
+
+  if (!activeTab) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
         </div>
       </Layout>
     );
@@ -483,7 +529,8 @@ export const Painel: React.FC = () => {
     { id: 'config', label: 'Configurações', icon: Settings, show: isAdmin },
     { id: 'ti', label: 'Painel TI', icon: Monitor, show: isTI },
     { id: 'mural', label: 'Painel RH', icon: MessageSquare, show: isRH },
-    { id: 'cardapio', label: 'Cardápio', icon: UtensilsCrossed, show: isRH }
+    { id: 'cardapio', label: 'Cardápio', icon: UtensilsCrossed, show: isRH },
+    { id: 'minhas-solicitacoes', label: 'Minhas Solicitações', icon: Clock, show: hasAccess && !isAdmin && !isRH && !isTI }
   ].filter(tab => tab.show);
 
   return (
@@ -513,6 +560,12 @@ export const Painel: React.FC = () => {
 
         {/* Tab Content */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          {loading && (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+            </div>
+          )}
+
           {/* Users Tab */}
           {activeTab === 'usuarios' && isAdmin && (
             <div className="space-y-6">
@@ -583,7 +636,7 @@ export const Painel: React.FC = () => {
           )}
 
           {/* Reports Tab */}
-          {activeTab === 'relatorios' && (isAdmin || isRH) && (
+          {activeTab === 'relatorios' && (isAdmin || isRH || isTI) && (
             <div className="space-y-6">
               <h2 className="text-xl font-semibold text-gray-900">Relatórios e Exportações</h2>
               
@@ -612,29 +665,33 @@ export const Painel: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-2">Agendamentos Portaria</h3>
-                  <p className="text-sm text-gray-600 mb-3">Exportar agendamentos da portaria</p>
-                  <button
-                    onClick={() => exportReport('portaria')}
-                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Exportar CSV</span>
-                  </button>
-                </div>
+                {(isAdmin || isRH) && (
+                  <div className="p-4 border border-gray-200 rounded-lg">
+                    <h3 className="font-medium text-gray-900 mb-2">Agendamentos Portaria</h3>
+                    <p className="text-sm text-gray-600 mb-3">Exportar agendamentos da portaria</p>
+                    <button
+                      onClick={() => exportReport('portaria')}
+                      className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Exportar CSV</span>
+                    </button>
+                  </div>
+                )}
 
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-2">Reservas de Salas</h3>
-                  <p className="text-sm text-gray-600 mb-3">Exportar reservas de salas</p>
-                  <button
-                    onClick={() => exportReport('reservas')}
-                    className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Exportar CSV</span>
-                  </button>
-                </div>
+                {(isAdmin || isRH) && (
+                  <div className="p-4 border border-gray-200 rounded-lg">
+                    <h3 className="font-medium text-gray-900 mb-2">Reservas de Salas</h3>
+                    <p className="text-sm text-gray-600 mb-3">Exportar reservas de salas</p>
+                    <button
+                      onClick={() => exportReport('reservas')}
+                      className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Exportar CSV</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -683,6 +740,12 @@ export const Painel: React.FC = () => {
                         </div>
                       </div>
                     ))}
+                    {Object.keys(config).length === 0 && (
+                      <div className="text-center py-8 text-gray-500">
+                        <Settings className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                        <p>Nenhuma configuração encontrada</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -692,25 +755,6 @@ export const Painel: React.FC = () => {
           {/* TI Panel Tab */}
           {activeTab === 'ti' && isTI && (
             <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Painel TI</h2>
-                <div className="space-x-2">
-                  <button
-                    onClick={() => {
-                      setShowMinhasSolicitacoes(true);
-                      loadMinhasSolicitacoes();
-                    }}
-                    className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span>Minhas Solicitações</span>
-                  </button>
-                  <button
-                    onClick={() => setShowNewSolicitacao(true)}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Plus className="w-4 h-4" />
-                    <span>Nova Solicitação</span>
                   </button>
                 </div>
               </div>
@@ -759,6 +803,14 @@ export const Painel: React.FC = () => {
                         </td>
                       </tr>
                     ))}
+                    {tiSolicitacoes.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="py-8 text-center text-gray-500">
+                          <Monitor className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                          <p>Nenhuma solicitação encontrada</p>
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -808,6 +860,12 @@ export const Painel: React.FC = () => {
                     <p className="text-gray-700">{post.conteudo}</p>
                   </div>
                 ))}
+                {muralPosts.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <MessageSquare className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                    <p>Nenhum post encontrado</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -879,6 +937,52 @@ export const Painel: React.FC = () => {
                     </p>
                   </div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* My Requests Tab */}
+          {activeTab === 'minhas-solicitacoes' && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Minhas Solicitações TI</h2>
+                <button
+                  onClick={() => setShowNewSolicitacao(true)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nova Solicitação</span>
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                {minhasSolicitacoes.map(solicitacao => (
+                  <div key={solicitacao.id} className="p-4 border border-gray-200 rounded-lg">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 className="font-semibold text-gray-900">{solicitacao.titulo}</h3>
+                        <p className="text-sm text-gray-600">{new Date(solicitacao.created_at).toLocaleDateString('pt-BR')}</p>
+                      </div>
+                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                        solicitacao.status === 'pendente' ? 'bg-yellow-100 text-yellow-800' :
+                        solicitacao.status === 'aprovado' ? 'bg-green-100 text-green-800' :
+                        'bg-red-100 text-red-800'
+                      }`}>
+                        {solicitacao.status}
+                      </span>
+                    </div>
+                    <p className="text-gray-700">{solicitacao.descricao}</p>
+                    {solicitacao.responsavel_nome && (
+                      <p className="text-sm text-gray-500 mt-2">Responsável: {solicitacao.responsavel_nome}</p>
+                    )}
+                  </div>
+                ))}
+                {minhasSolicitacoes.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <Clock className="w-12 h-12 mx-auto mb-4 text-gray-400" />
+                    <p>Nenhuma solicitação encontrada</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -955,9 +1059,6 @@ export const Painel: React.FC = () => {
             </div>
           </div>
         )}
-
-        {/* Other modals follow similar patterns... */}
-        {/* For brevity, I'll include a few key ones */}
 
         {/* New TI Request Modal */}
         {showNewSolicitacao && (
@@ -1106,49 +1207,6 @@ export const Painel: React.FC = () => {
                     </button>
                   </div>
                 </form>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* My Requests Modal */}
-        {showMinhasSolicitacoes && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl mx-4 max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">Minhas Solicitações</h2>
-                  <button
-                    onClick={() => setShowMinhasSolicitacoes(false)}
-                    className="text-gray-400 hover:text-gray-600"
-                  >
-                    <XCircle className="w-6 h-6" />
-                  </button>
-                </div>
-                
-                <div className="space-y-4">
-                  {minhasSolicitacoes.map(solicitacao => (
-                    <div key={solicitacao.id} className="p-4 border border-gray-200 rounded-lg">
-                      <div className="flex items-start justify-between mb-2">
-                        <div>
-                          <h3 className="font-semibold text-gray-900">{solicitacao.titulo}</h3>
-                          <p className="text-sm text-gray-600">{new Date(solicitacao.created_at).toLocaleDateString('pt-BR')}</p>
-                        </div>
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                          solicitacao.status === 'pendente' ? 'bg-yellow-100 text-yellow-800' :
-                          solicitacao.status === 'aprovado' ? 'bg-green-100 text-green-800' :
-                          'bg-red-100 text-red-800'
-                        }`}>
-                          {solicitacao.status}
-                        </span>
-                      </div>
-                      <p className="text-gray-700">{solicitacao.descricao}</p>
-                      {solicitacao.responsavel_nome && (
-                        <p className="text-sm text-gray-500 mt-2">Responsável: {solicitacao.responsavel_nome}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
               </div>
             </div>
           </div>
