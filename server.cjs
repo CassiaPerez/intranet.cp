@@ -533,6 +533,29 @@ app.get('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admi
   }
 });
 
+// Create default admin user if none exists
+async function ensureDefaultAdmin() {
+  try {
+    const adminExists = await get("SELECT id FROM usuarios WHERE role = 'admin' AND ativo = 1 LIMIT 1");
+    if (!adminExists) {
+      const defaultPassword = 'admin123';
+      const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+      await run(
+        "INSERT OR IGNORE INTO usuarios(nome, email, setor, role, senha_hash, ativo) VALUES(?, ?, ?, ?, ?, 1)",
+        ['Administrador', 'admin@grupocropfield.com.br', 'TI', 'admin', hashedPassword]
+      );
+      console.log('Default admin user created: admin@grupocropfield.com.br / admin123');
+    }
+  } catch (error) {
+    console.error('Error creating default admin:', error);
+  }
+}
+
+// Call this after schema creation
+createSchema().then(() => {
+  ensureDefaultAdmin();
+});
+
 app.post('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
   try {
     const { nome, email, setor, role, senha } = req.body;

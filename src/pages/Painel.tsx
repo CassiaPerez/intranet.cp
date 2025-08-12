@@ -111,62 +111,92 @@ export const Painel: React.FC = () => {
   }, [activeTab, hasAccess, isAdmin, isTI, isRH]);
 
   const loadUsers = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/admin/users`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setUsers(data.users || []);
+      } else {
+        toast.error('Erro ao carregar usuários');
       }
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
+      toast.error('Erro ao carregar usuários');
+    } finally {
+      setLoading(false);
     }
   };
 
   const loadTISolicitacoes = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/ti/solicitacoes`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setTiSolicitacoes(data.solicitacoes || []);
+      } else {
+        toast.error('Erro ao carregar solicitações TI');
       }
     } catch (error) {
       console.error('Erro ao carregar solicitações TI:', error);
+      toast.error('Erro ao carregar solicitações TI');
+    } finally {
+      setLoading(false);
     }
   };
 
   const loadMinhasSolicitacoes = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/ti/minhas`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setMinhasSolicitacoes(data.solicitacoes || []);
+      } else {
+        toast.error('Erro ao carregar minhas solicitações');
       }
     } catch (error) {
       console.error('Erro ao carregar minhas solicitações:', error);
+      toast.error('Erro ao carregar minhas solicitações');
+    } finally {
+      setLoading(false);
     }
   };
 
   const loadMuralPosts = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/mural/posts`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setMuralPosts(data.posts || []);
+      } else {
+        toast.error('Erro ao carregar posts do mural');
       }
     } catch (error) {
       console.error('Erro ao carregar posts do mural:', error);
+      toast.error('Erro ao carregar posts do mural');
+    } finally {
+      setLoading(false);
     }
   };
 
   const loadConfig = async () => {
+    setLoading(true);
     try {
       const response = await fetch(`${API_BASE}/api/admin/config`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setConfig(data.config || {});
+      } else {
+        toast.error('Erro ao carregar configurações');
       }
     } catch (error) {
       console.error('Erro ao carregar configurações:', error);
+      toast.error('Erro ao carregar configurações');
+    } finally {
+      setLoading(false);
     }
   };
 
