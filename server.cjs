@@ -368,13 +368,20 @@ app.get('/api/contatos', (req, res) => {
     const { q } = req.query;
     const contatosPath = path.join(__dirname, 'public', 'dados', 'contatos.json');
     if (!fs.existsSync(contatosPath)) return res.json([]);
-    const contatos = JSON.parse(fs.readFileSync(contatosPath, 'utf8'));
+    const data = JSON.parse(fs.readFileSync(contatosPath, 'utf8'));
+    
+    // Flatten the structure to a single array
+    const contatos = [
+      ...(data.representantes || []),
+      ...(data.equipe_apucarana_pr || [])
+    ];
+    
     if (!q) return res.json(contatos);
     const query = String(q).toLowerCase();
     const filtered = contatos.filter(c =>
       c.nome.toLowerCase().includes(query) ||
-      c.email.toLowerCase().includes(query) ||
-      c.ramal.toLowerCase().includes(query) ||
+      (c.email || '').toLowerCase().includes(query) ||
+      (c.ramal || '').toLowerCase().includes(query) ||
       c.setor.toLowerCase().includes(query)
     );
     res.json(filtered);
