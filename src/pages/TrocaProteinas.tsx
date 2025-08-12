@@ -254,6 +254,9 @@ export const TrocaProteinas: React.FC = () => {
                         onMouseDown={(e)=>e.stopPropagation()}
                         onClick={(e)=>e.stopPropagation()}
                         onKeyDown={(e)=>e.stopPropagation()}
+                        onMouseDown={(e)=>e.stopPropagation()}
+                        onClick={(e)=>e.stopPropagation()}
+                        onKeyDown={(e)=>e.stopPropagation()}
                         disabled={disabled}
                         title={disabled ? 'Não há cardápio neste dia' : undefined}
                       >
