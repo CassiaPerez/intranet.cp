@@ -9,11 +9,18 @@ import { useGamification } from '../contexts/GamificationContext';
 
 const PROTEIN_OPTIONS = ['Frango','Omelete','Ovo frito','Ovo cozido'] as const;
 type ProteinLabel = typeof PROTEIN_OPTIONS[number];
-const normalizeProtein = (v: string) => {
-  const m: Record<string, ProteinLabel> = {
-    frango: 'Frango', omelete: 'Omelete', 'ovo frito': 'Ovo frito', 'ovo cozido': 'Ovo cozido'
-  };
-  const k = v.trim().toLowerCase(); return m[k] ?? v;
+
+const ORIGINAL_SENTINEL = '__ORIGINAL__';
+
+/** Normaliza textos do cardápio para uma das 4 opções (ou '' se não reconhecer). */
+const normalizeProtein = (v: string): ProteinLabel | '' => {
+  const s = (v || '').trim().toLowerCase();
+  if (!s) return '';
+  if (s.includes('frango')) return 'Frango';
+  if (s.includes('omelete')) return 'Omelete';
+  if (s.includes('frito'))   return 'Ovo frito';
+  if (s.includes('cozid'))   return 'Ovo cozido';
+  return '';
 };
 
 const API_BASE = '';
@@ -238,16 +245,15 @@ export const TrocaProteinas: React.FC = () => {
               </tr>
             </thead>
             <tbody>
-              {diasDoMes.map((d) => {
+              {diasDoMes.filter(d => originalByDate[format(d, 'yyyy-MM-dd')]).map((d) => {
                 const dataISO = format(d, 'yyyy-MM-dd');
                 const original = originalByDate[dataISO] || ''; // vazio quando não há cardápio
                 const selected = trocas[dataISO]?.proteina_nova || "";
 
-                const disabled = !original; // quando não há cardápio nesse dia, não permite trocar
                 return (
                   <tr key={dataISO} className="border-t">
                     <td className="px-3 py-2">{format(d, 'dd/MM/yyyy (EEE)', { locale: ptBR })}</td>
-                    <td className="px-3 py-2">{original || <span className="text-slate-400">— sem cardápio —</span>}</td>
+                    <td className="px-3 py-2">{original}</td>
                     <td className="px-3 py-2 relative z-10 pointer-events-auto">
                       <select
                         className="border rounded-lg px-2 py-1 w-full"
@@ -256,15 +262,10 @@ export const TrocaProteinas: React.FC = () => {
                         onMouseDown={(e)=>e.stopPropagation()}
                         onClick={(e)=>e.stopPropagation()}
                         onKeyDown={(e)=>e.stopPropagation()}
-                        onMouseDown={(e)=>e.stopPropagation()}
-                        onClick={(e)=>e.stopPropagation()}
-                        onKeyDown={(e)=>e.stopPropagation()}
-                        disabled={disabled}
-                        title={disabled ? 'Não há cardápio neste dia' : undefined}
                       >
                         <option value="">— Manter original —</option>
                         {PROTEIN_OPTIONS.map((p) => (
-                          <option key={p} value={p} disabled={p === original}>
+                          <option key={p} value={p} disabled={normalizeProtein(original) === p}>
                             {p}
                           </option>
                         ))}
