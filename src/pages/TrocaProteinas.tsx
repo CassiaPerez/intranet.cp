@@ -246,16 +246,19 @@ export const TrocaProteinas: React.FC = () => {
                   <tr key={dataISO} className="border-t">
                     <td className="px-3 py-2">{format(d, 'dd/MM/yyyy (EEE)', { locale: ptBR })}</td>
                     <td className="px-3 py-2">{original || <span className="text-slate-400">— sem cardápio —</span>}</td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 relative z-10 pointer-events-auto">
                       <select
                         className="border rounded-lg px-2 py-1 w-full"
                         value={selected}
                         onChange={(e) => handleChange(dataISO, e.target.value)}
+                        onMouseDown={(e)=>e.stopPropagation()}
+                        onClick={(e)=>e.stopPropagation()}
+                        onKeyDown={(e)=>e.stopPropagation()}
                         disabled={disabled}
                         title={disabled ? 'Não há cardápio neste dia' : undefined}
                       >
                         <option value="">— Manter original —</option>
-                        {opcoesProteina.map((p) => (
+                        {PROTEIN_OPTIONS.map((p) => (
                           <option key={p} value={p} disabled={p === original}>
                             {p}
                           </option>
