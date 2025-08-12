@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
 function SidebarImpl() {
   const { user, logout } = useAuth();
   const isAdmin = !!user && (user.sector === 'TI' || user.sector === 'RH' || user.role === 'admin' || user.role === 'rh' || user.role === 'ti');
+  const isAdminOrRH = !!user && (user.role === 'admin' || user.role === 'rh' || user.sector === 'RH');
 
   return (
     <aside className="w-64 min-h-screen border-r bg-white p-4">
@@ -26,7 +27,10 @@ function SidebarImpl() {
         <div className="text-xs text-slate-500 truncate">{user?.name || 'Visitante'}</div>
       </div>
       <nav className="flex flex-col gap-1">
-        {NAV.filter(i => !i.adminOnly || isAdmin).map(item => (
+        {NAV.filter(item => {
+          if (item.to === '/painel') return isAdminOrRH;
+          return !item.adminOnly || isAdmin;
+        }).map(item => (
           <NavLink
             key={item.to}
             to={item.to}
