@@ -755,6 +755,14 @@ export const Painel: React.FC = () => {
           {/* TI Panel Tab */}
           {activeTab === 'ti' && isTI && (
             <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Solicitações TI</h2>
+                <div className="flex space-x-2">
+                  <button
+                    onClick={loadTISolicitacoes}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Atualizar
                   </button>
                 </div>
               </div>
@@ -1030,12 +1038,6 @@ export const Painel: React.FC = () => {
                     <option value="ti">TI</option>
                     <option value="admin">Admin</option>
                   </select>
-                  <button
-                    onClick={loadTiSolicitacoes}
-                    disabled={loadingTi}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                  >
-                    {loadingTi ? 'Carregando...' : 'Atualizar'}
                   <input
                     type="password"
                     value={newUser.senha}
