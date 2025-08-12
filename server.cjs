@@ -387,7 +387,7 @@ app.get('/api/contatos', (req, res) => {
     res.json(filtered);
   } catch (error) {
     console.error('Erro ao buscar contatos:', error);
-    res.status(500).json({ ok: false, error: 'Erro ao buscar contatos' });
+    res.json([]);
   }
 });
 
