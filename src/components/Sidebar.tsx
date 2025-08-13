@@ -12,13 +12,14 @@ const NAV: NavItem[] = [
   { to: '/diretorio', label: 'Diretório' },
   { to: '/equipamentos', label: 'Equipamentos', adminOnly: true },
   { to: '/mural', label: 'Mural' },
-  { to: '/painel', label: 'Painel', adminOnly: true },
+  { to: '/painel', label: 'Painel Admin', adminOnly: true },
 ];
 
 function SidebarImpl() {
   const { user, logout } = useAuth();
   const isAdmin = !!user && (user.sector === 'TI' || user.sector === 'RH' || user.role === 'admin' || user.role === 'rh' || user.role === 'ti');
   const isAdminOrRH = !!user && (user.role === 'admin' || user.role === 'rh' || user.sector === 'RH');
+  const isOnlyAdmin = !!user && (user.role === 'admin');
 
   return (
     <aside className="w-64 min-h-screen border-r bg-white p-4">
@@ -28,7 +29,7 @@ function SidebarImpl() {
       </div>
       <nav className="flex flex-col gap-1">
         {NAV.filter(item => {
-          if (item.to === '/painel') return isAdminOrRH;
+          if (item.to === '/painel') return isOnlyAdmin;
           return !item.adminOnly || isAdmin;
         }).map(item => (
           <NavLink
