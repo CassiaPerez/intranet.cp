@@ -69,8 +69,23 @@ const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) console.error('Erro ao abrir o banco:', err.message);
-  else console.log('Banco conectado:', dbPath);
+  if (err) {
+    console.error('Erro ao abrir o banco:', err.message);
+    // Handle EIO errors by deleting the corrupted database file
+    if (err.code === 'EIO') {
+      console.log('Detectado erro EIO - removendo arquivo de banco corrompido...');
+      try {
+        if (fs.existsSync(dbPath)) {
+          fs.unlinkSync(dbPath);
+          console.log('Arquivo de banco removido. Reinicie o servidor para criar um novo banco.');
+        }
+      } catch (deleteErr) {
+        console.error('Erro ao remover arquivo de banco:', deleteErr.message);
+      }
+    }
+  } else {
+    console.log('Banco conectado:', dbPath);
+  }
 });
 
 // -------------------------------------------------------------
