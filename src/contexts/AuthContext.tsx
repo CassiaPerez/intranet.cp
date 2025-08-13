@@ -7,6 +7,8 @@ interface User {
   name: string;
   email: string;
   sector: string;
+  setor: string;
+  role: string;
   avatar?: string;
 }
 
@@ -47,6 +49,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (storedUser) {
         try {
           const userData = JSON.parse(storedUser);
+          // Normalize user data structure for compatibility
+          if (userData && userData.email) {
+            // Ensure both sector and setor exist
+            if (userData.sector && !userData.setor) {
+              userData.setor = userData.sector;
+            }
+            if (userData.setor && !userData.sector) {
+              userData.sector = userData.setor;
+            }
+            // Ensure role exists
+            if (!userData.role) {
+              if (userData.email === 'admin@grupocropfield.com.br' || userData.sector === 'TI' || userData.setor === 'TI') {
+                userData.role = 'admin';
+              } else if (userData.sector === 'RH' || userData.setor === 'RH') {
+                userData.role = 'rh';
+              } else {
+                userData.role = 'colaborador';
+              }
+            }
+            console.log('User data normalized:', userData);
+          }
           setUser(userData);
           setIsAuthenticated(true);
           return;
@@ -66,6 +89,25 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           if (responseText) {
             try {
               const data = JSON.parse(responseText);
+              // Normalize API user data
+              if (data.user) {
+                if (data.user.sector && !data.user.setor) {
+                  data.user.setor = data.user.sector;
+                }
+                if (data.user.setor && !data.user.sector) {
+                  data.user.sector = data.user.setor;
+                }
+                if (!data.user.role) {
+                  if (data.user.email === 'admin@grupocropfield.com.br' || data.user.sector === 'TI' || data.user.setor === 'TI') {
+                    data.user.role = 'admin';
+                  } else if (data.user.sector === 'RH' || data.user.setor === 'RH') {
+                    data.user.role = 'rh';
+                  } else {
+                    data.user.role = 'colaborador';
+                  }
+                }
+                console.log('API user data normalized:', data.user);
+              }
               setUser(data.user);
               setIsAuthenticated(true);
               localStorage.setItem('currentUser', JSON.stringify(data.user));

@@ -30,14 +30,22 @@ export const AdminPanel: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
   
+  // Debug user data
+  console.log('AdminPanel user data:', user);
+  
   // Check if user has admin permissions
-  const hasAdminAccess = user && (
+  const hasAdminAccess = !!user && (
     user.role === 'admin' || 
+    user.email === 'admin@grupocropfield.com.br' ||
     user.sector === 'TI' || 
     user.sector === 'RH' ||
-    (user as any).setor === 'TI' ||
-    (user as any).setor === 'RH'
+    user.setor === 'TI' ||
+    user.setor === 'RH' ||
+    user.role === 'rh' ||
+    user.role === 'ti'
   );
+  
+  console.log('Admin access:', hasAdminAccess);
   
   if (!hasAdminAccess) {
     return (
@@ -45,6 +53,9 @@ export const AdminPanel: React.FC = () => {
         <div className="text-center py-12">
           <h1 className="text-2xl font-bold text-gray-900 mb-4">Acesso Negado</h1>
           <p className="text-gray-600">Você não tem permissão para acessar esta área.</p>
+          <p className="text-xs text-gray-500 mt-4">
+            Debug: role={user?.role}, email={user?.email}, sector={user?.sector}, setor={user?.setor}
+          </p>
         </div>
       </Layout>
     );

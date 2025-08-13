@@ -18,25 +18,22 @@ const NAV: NavItem[] = [
 function SidebarImpl() {
   const { user, logout } = useAuth();
   
-  // Verifica se é admin/rh/ti para itens com adminOnly
-  const canAccessAdminItems = !!user && (
-    user.role === 'admin' || 
-    user.role === 'rh' || 
-    user.role === 'ti' || 
+  // Debug user data
+  console.log('Sidebar user data:', user);
+  
+  // Simplified admin check - if any admin indicator is true
+  const isAdmin = !!user && (
+    user.role === 'admin' ||
+    user.email === 'admin@grupocropfield.com.br' ||
     user.sector === 'TI' || 
     user.sector === 'RH' ||
-    (user as any).setor === 'TI' ||
-    (user as any).setor === 'RH'
+    user.setor === 'TI' ||
+    user.setor === 'RH' ||
+    user.role === 'rh' ||
+    user.role === 'ti'
   );
   
-  // Verifica se é ESTRITAMENTE admin para o Painel Admin
-  const isStrictAdmin = !!user && (
-    user.role === 'admin' || 
-    user.sector === 'TI' || 
-    user.sector === 'RH' ||
-    (user as any).setor === 'TI' ||
-    (user as any).setor === 'RH'
-  );
+  console.log('Is admin:', isAdmin, 'User role:', user?.role, 'User sector:', user?.sector, 'User setor:', user?.setor);
 
   return (
     <aside className="w-64 min-h-screen border-r bg-white p-4">
@@ -48,11 +45,11 @@ function SidebarImpl() {
         {NAV.filter(item => {
           // Painel Admin: APENAS para role === 'admin'
           if (item.to === '/painel') {
-            return isStrictAdmin;
+            return isAdmin;
           }
           // Outros itens adminOnly: para admin/rh/ti
           if (item.adminOnly) {
-            return canAccessAdminItems;
+            return isAdmin;
           }
           // Itens normais: para todos
           return true;

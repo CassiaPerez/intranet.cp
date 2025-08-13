@@ -29,13 +29,19 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (requireAdmin) {
-    const isAdmin = user && (
+    const isAdmin = !!user && (
       user.role === 'admin' || 
+      user.email === 'admin@grupocropfield.com.br' ||
       user.sector === 'TI' || 
       user.sector === 'RH' ||
-      (user as any).setor === 'TI' ||
-      (user as any).setor === 'RH'
+      user.setor === 'TI' ||
+      user.setor === 'RH' ||
+      user.role === 'rh' ||
+      user.role === 'ti'
     );
+    
+    console.log('ProtectedRoute admin check:', isAdmin, user);
+    
     if (!isAdmin) {
       return <Navigate to="/" replace />;
     }
