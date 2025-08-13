@@ -29,7 +29,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   }
 
   if (requireAdmin) {
-    const isAdmin = user && (user.sector === 'TI' || user.sector === 'RH');
+    const isAdmin = user && (
+      user.role === 'admin' || 
+      user.sector === 'TI' || 
+      user.sector === 'RH'
+    );
     if (!isAdmin) {
       return <Navigate to="/" replace />;
     }

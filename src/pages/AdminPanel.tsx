@@ -27,7 +27,26 @@ import toast from 'react-hot-toast';
 const API_BASE = '';
 
 export const AdminPanel: React.FC = () => {
+  const { user } = useAuth();
   const location = useLocation();
+  
+  // Check if user has admin permissions
+  const hasAdminAccess = user && (
+    user.role === 'admin' || 
+    user.sector === 'TI' || 
+    user.sector === 'RH'
+  );
+  
+  if (!hasAdminAccess) {
+    return (
+      <Layout>
+        <div className="text-center py-12">
+          <h1 className="text-2xl font-bold text-gray-900 mb-4">Acesso Negado</h1>
+          <p className="text-gray-600">Você não tem permissão para acessar esta área.</p>
+        </div>
+      </Layout>
+    );
+  }
   
   return (
     <Layout>

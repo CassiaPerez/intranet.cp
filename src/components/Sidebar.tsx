@@ -28,12 +28,11 @@ function SidebarImpl() {
   );
   
   // Verifica se é ESTRITAMENTE admin para o Painel Admin
-  const isStrictAdmin = !!user && 
-    user.role === 'admin' && 
-    user.role !== 'rh' && 
-    user.role !== 'ti' &&
-    user.sector !== 'RH' &&
-    user.sector !== 'TI';
+  const isStrictAdmin = !!user && (
+    user.role === 'admin' || 
+    user.sector === 'TI' || 
+    user.sector === 'RH'
+  );
 
   return (
     <aside className="w-64 min-h-screen border-r bg-white p-4">
