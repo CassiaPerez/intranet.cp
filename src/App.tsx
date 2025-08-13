@@ -15,7 +15,6 @@ import { AdminPanel } from './pages/AdminPanel';
 import { TrocaProteinas } from './pages/TrocaProteinas';
 import './index.css';
 import { Painel } from './pages/Painel';
-import { GerenciamentoUsuarios } from './pages/GerenciamentoUsuarios';
 
 function App() {
   return (
@@ -102,14 +101,6 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Painel />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/usuarios"
-                element={
-                  <ProtectedRoute requireAdmin>
-                    <GerenciamentoUsuarios />
                   </ProtectedRoute>
                 }
               />

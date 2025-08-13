@@ -12,7 +12,6 @@ const NAV: NavItem[] = [
   { to: '/diretorio', label: 'Diretório' },
   { to: '/equipamentos', label: 'Equipamentos', adminOnly: true },
   { to: '/mural', label: 'Mural' },
-  { to: '/usuarios', label: 'Usuários', adminOnly: true },
   { to: '/painel', label: 'Painel Admin' }, // Removido adminOnly porque vamos tratar especificamente
 ];
 
