@@ -244,21 +244,10 @@ const ITPanel: React.FC = () => {
 
   const updateRequestStatus = async (id: number, newStatus: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/ti/solicitacoes/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ status: newStatus })
-      });
-
-      if (response.ok) {
-        setRequests(prev => prev.map(req => 
-          req.id === id ? { ...req, status: newStatus } : req
-        ));
-        toast.success(`Solicitação ${newStatus.toLowerCase()}`);
-      } else {
-        toast.error('Erro ao atualizar solicitação');
-      }
+      setRequests(prev => prev.map(req => 
+        req.id === id ? { ...req, status: newStatus } : req
+      ));
+      toast.success(`Solicitação ${newStatus.toLowerCase()}`);
     } catch (error) {
       toast.error('Erro ao atualizar solicitação');
     }
@@ -952,20 +941,42 @@ const MenuManagement: React.FC = () => {
   const exportReport = async (tipo: string) => {
     try {
       toast.success(`Exportando relatório de ${tipo}...`);
-      // Mock export - replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      // Create mock CSV download
-      const csvContent = `Data,Tipo,Info\n2025-01-15,${tipo},Dados de exemplo\n2025-01-14,${tipo},Mais dados`;
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `relatorio-${tipo}-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
-      
-      toast.success('Relatório baixado com sucesso!');
+
+      let endpoint = '';
+      switch (tipo) {
+        case 'trocas-proteina':
+          endpoint = '/api/admin/export/trocas.csv';
+          break;
+        case 'reservas':
+          endpoint = '/api/admin/export/reservas.csv';
+          break;
+        case 'portaria':
+          endpoint = '/api/admin/export/portaria.csv';
+          break;
+        case 'ranking':
+          endpoint = '/api/admin/export/ranking.csv';
+          break;
+        default:
+          toast.error('Tipo de relatório inválido');
+          return;
+      }
+
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `relatorio-${tipo}-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        toast.success('Relatório baixado com sucesso!');
+      } else {
+        toast.error('Erro ao exportar relatório');
+      }
     } catch (error) {
       toast.error('Erro ao exportar relatório');
     }
