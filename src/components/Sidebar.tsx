@@ -28,8 +28,13 @@ function SidebarImpl() {
     user.sector === 'RH'
   );
   
-  // Verifica se é APENAS admin para o Painel Admin
-  const isOnlyAdmin = !!user && user.role === 'admin';
+  // Verifica se é ESTRITAMENTE admin para o Painel Admin
+  const isStrictAdmin = !!user && 
+    user.role === 'admin' && 
+    user.role !== 'rh' && 
+    user.role !== 'ti' &&
+    user.sector !== 'RH' &&
+    user.sector !== 'TI';
 
   return (
     <aside className="w-64 min-h-screen border-r bg-white p-4">
@@ -41,7 +46,7 @@ function SidebarImpl() {
         {NAV.filter(item => {
           // Painel Admin: APENAS para role === 'admin'
           if (item.to === '/painel') {
-            return isOnlyAdmin;
+            return isStrictAdmin;
           }
           // Outros itens adminOnly: para admin/rh/ti
           if (item.adminOnly) {
