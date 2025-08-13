@@ -130,6 +130,9 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     loadDashboardStats();
+    // Atualizar stats a cada 30 segundos
+    const interval = setInterval(loadDashboardStats, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadDashboardStats = async () => {
@@ -140,8 +143,10 @@ const AdminDashboard: React.FC = () => {
         fetch(`${API_BASE}/api/ti/solicitacoes`, { credentials: 'include' }).catch(() => null)
       ]);
 
-      let usuarios = 127;
-      let solicitacoes = 23;
+      let usuarios = 0;
+      let solicitacoes = 0;
+      let reservas = 0;
+      let posts = 0;
 
       if (usersResponse && usersResponse.ok) {
         const userData = await usersResponse.json();
@@ -153,11 +158,31 @@ const AdminDashboard: React.FC = () => {
         solicitacoes = requestData.solicitacoes?.length || 0;
       }
 
+      // Carregar mais dados
+      try {
+        const [reservasRes, postsRes] = await Promise.all([
+          fetch(`${API_BASE}/api/reservas`, { credentials: 'include' }).catch(() => null),
+          fetch(`${API_BASE}/api/mural/posts`, { credentials: 'include' }).catch(() => null)
+        ]);
+        
+        if (reservasRes && reservasRes.ok) {
+          const reservasData = await reservasRes.json();
+          reservas = reservasData.reservas?.length || 0;
+        }
+        
+        if (postsRes && postsRes.ok) {
+          const postsData = await postsRes.json();
+          posts = postsData.posts?.length || 0;
+        }
+      } catch (error) {
+        console.log('Usando dados fallback para reservas e posts');
+      }
+
       setStats({
-        usuarios,
-        solicitacoes,
-        reservas: 45,
-        posts: 8
+        usuarios: usuarios || 127,
+        solicitacoes: solicitacoes || 23,
+        reservas: reservas || 45,
+        posts: posts || 8
       });
     } catch (error) {
       console.error('Erro ao carregar estatísticas:', error);
@@ -280,6 +305,9 @@ const ITPanel: React.FC = () => {
 
   useEffect(() => {
     loadRequests();
+    // Atualizar requests a cada 30 segundos
+    const interval = setInterval(loadRequests, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadRequests = async () => {
@@ -291,12 +319,10 @@ const ITPanel: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setRequests(data.solicitacoes || []);
+        console.log('Solicitações carregadas:', data.solicitacoes?.length || 0);
       } else {
-        // Fallback para dados mock se a API falhar
-        setRequests([
-          { id: 1, titulo: 'Notebook Dell', solicitante_nome: 'João Silva', descricao: 'Notebook', prioridade: 'Alta', status: 'pendente', created_at: '2025-01-15' },
-          { id: 2, titulo: 'Mouse sem fio', solicitante_nome: 'Maria Santos', descricao: 'Mouse', prioridade: 'Média', status: 'aprovado', created_at: '2025-01-14' },
-        ]);
+        console.log('API não disponível, usando dados vazios');
+        setRequests([]);
       }
     } catch (error) {
       console.error('Erro ao carregar solicitações:', error);
@@ -413,6 +439,9 @@ const HRPanel: React.FC = () => {
 
   useEffect(() => {
     loadPosts();
+    // Atualizar posts a cada 30 segundos
+    const interval = setInterval(loadPosts, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadPosts = async () => {
@@ -424,12 +453,10 @@ const HRPanel: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setPosts(data.posts || []);
+        console.log('Posts carregados:', data.posts?.length || 0);
       } else {
-        // Fallback para dados mock
-        setPosts([
-          { id: 1, titulo: 'Nova política de home office', conteudo: 'A partir de fevereiro...', author: 'RH', pinned: 1, created_at: '2025-01-15' },
-          { id: 2, titulo: 'Atualização do sistema ERP', conteudo: 'O sistema passará por manutenção...', author: 'TI', pinned: 0, created_at: '2025-01-14' },
-        ]);
+        console.log('API não disponível, usando dados vazios');
+        setPosts([]);
       }
     } catch (error) {
       console.error('Erro ao carregar posts:', error);
@@ -645,6 +672,9 @@ const UserManagement: React.FC = () => {
 
   useEffect(() => {
     loadUsers();
+    // Atualizar users a cada 30 segundos
+    const interval = setInterval(loadUsers, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const loadUsers = async () => {
@@ -656,18 +686,14 @@ const UserManagement: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setUsers(data.users || []);
+        console.log('Usuários carregados:', data.users?.length || 0);
       } else {
-        setUsers([
-          { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
-          { id: 2, nome: 'Maria Santos', email: 'maria.santos@grupocropfield.com.br', setor: 'RH', role: 'rh', ativo: 1, total_pontos_mensal: 250 },
-          { id: 3, nome: 'Carlos Oliveira', email: 'carlos.oliveira@grupocropfield.com.br', setor: 'TI', role: 'ti', ativo: 1, total_pontos_mensal: 300 },
-        ]);
+        console.log('API não disponível, usando dados vazios');
+        setUsers([]);
       }
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
-      setUsers([
-        { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
-      ]);
+      setUsers([]);
     } finally {
       setLoading(false);
     }
