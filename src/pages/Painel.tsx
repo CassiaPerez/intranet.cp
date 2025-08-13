@@ -1,45 +1,53 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { 
   Users, 
-  Download, 
-  Settings, 
-  Monitor, 
-  MessageSquare, 
-  UtensilsCrossed,
-  Plus,
-  Edit,
-  Trash2,
+  UserPlus, 
+  Search, 
+  Edit3, 
+  Trash2, 
+  Shield, 
+  Eye, 
+  EyeOff,
   Save,
+  X,
+  Crown,
+  Briefcase,
+  User,
+  Settings,
+  Star,
+  Download,
   Upload,
-  Eye,
+  FileText,
   CheckCircle,
   XCircle,
   Clock,
-  AlertCircle,
-  Calendar
+  Plus,
+  MessageSquare,
+  BarChart3,
+  UtensilsCrossed
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 const API_BASE = '';
 
-interface User {
-  id: number;
+interface Usuario {
+  id: string;
   nome: string;
   email: string;
   setor: string;
-  role: string;
-  ativo: number;
+  role: 'admin' | 'rh' | 'ti' | 'colaborador';
+  ativo: boolean;
   created_at: string;
   total_pontos_mensal: number;
 }
 
-interface TISolicitacao {
-  id: number;
+interface SolicitacaoTI {
+  id: string;
   titulo: string;
   descricao: string;
-  status: 'pendente' | 'aprovado' | 'reprovado';
+  status: 'pendente' | 'em_analise' | 'aprovada' | 'rejeitada' | 'concluida';
   solicitante_nome: string;
   solicitante_email: string;
   responsavel_nome?: string;
@@ -47,106 +55,129 @@ interface TISolicitacao {
   updated_at: string;
 }
 
-interface MuralPost {
-  id: number;
+interface PostMural {
+  id: string;
   titulo: string;
   conteudo: string;
   author: string;
-  pinned: number;
+  pinned: boolean;
   created_at: string;
 }
 
+const ROLES = [
+  { value: 'colaborador', label: 'Colaborador', icon: User, color: 'bg-gray-100 text-gray-800' },
+  { value: 'ti', label: 'TI', icon: Settings, color: 'bg-blue-100 text-blue-800' },
+  { value: 'rh', label: 'RH', icon: Briefcase, color: 'bg-green-100 text-green-800' },
+  { value: 'admin', label: 'Administrador', icon: Crown, color: 'bg-purple-100 text-purple-800' },
+];
+
+const SETORES = [
+  'Administração', 'Comercial', 'Financeiro', 'Geral', 'Logística', 
+  'Marketing', 'Operações', 'RH', 'TI', 'Vendas'
+];
+
+const STATUS_COLORS = {
+  pendente: 'bg-yellow-100 text-yellow-800',
+  em_analise: 'bg-blue-100 text-blue-800',
+  aprovada: 'bg-green-100 text-green-800',
+  rejeitada: 'bg-red-100 text-red-800',
+  concluida: 'bg-gray-100 text-gray-800'
+};
+
 export const Painel: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('');
+  const [activeTab, setActiveTab] = useState('usuarios');
   const [loading, setLoading] = useState(false);
 
-  // User role checks
-  const isAdmin = user?.role === 'admin';
-  const isRH = user?.role === 'rh' || user?.role === 'admin';
-  const isTI = user?.role === 'ti' || user?.role === 'admin';
-  const hasAccess = isAdmin || isRH || isTI;
-
-  // Available tabs based on user role
-  const availableTabs = useMemo(() => {
-    const tabs = [];
-    if (isAdmin) {
-      tabs.push('usuarios', 'relatorios', 'config');
-    }
-    if (isRH) {
-      tabs.push('relatorios', 'mural', 'cardapio');
-    }
-    if (isTI) {
-      tabs.push('relatorios', 'ti');
-    }
-    if (hasAccess && !isAdmin && !isRH && !isTI) {
-      tabs.push('minhas-solicitacoes');
-    }
-    return [...new Set(tabs)]; // Remove duplicates
-  }, [isAdmin, isRH, isTI, hasAccess]);
-
-  // Set initial active tab
-  useEffect(() => {
-    if (availableTabs.length > 0 && !activeTab) {
-      setActiveTab(availableTabs[0]);
-    }
-  }, [availableTabs, activeTab]);
-
-  // Users management state
-  const [users, setUsers] = useState<User[]>([]);
-  const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newUser, setNewUser] = useState({
+  // Estados para Usuários
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [showUserModal, setShowUserModal] = useState(false);
+  const [userModalMode, setUserModalMode] = useState<'create' | 'edit'>('create');
+  const [selectedUser, setSelectedUser] = useState<Usuario | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [userFormData, setUserFormData] = useState({
     nome: '',
     email: '',
-    setor: '',
-    role: 'colaborador',
-    senha: ''
+    setor: 'Geral',
+    role: 'colaborador' as Usuario['role'],
+    senha: '',
+    ativo: true
   });
 
-  // TI requests state
-  const [tiSolicitacoes, setTiSolicitacoes] = useState<TISolicitacao[]>([]);
-  const [minhasSolicitacoes, setMinhasSolicitacoes] = useState<TISolicitacao[]>([]);
-  const [showMinhasSolicitacoes, setShowMinhasSolicitacoes] = useState(false);
-  const [showNewSolicitacao, setShowNewSolicitacao] = useState(false);
-  const [newSolicitacao, setNewSolicitacao] = useState({ titulo: '', descricao: '' });
+  // Estados para TI
+  const [solicitacoesTI, setSolicitacoesTI] = useState<SolicitacaoTI[]>([]);
+  const [showTIModal, setShowTIModal] = useState(false);
+  const [tiFormData, setTiFormData] = useState({
+    titulo: '',
+    descricao: ''
+  });
 
-  // Mural posts state (for RH)
-  const [muralPosts, setMuralPosts] = useState<MuralPost[]>([]);
-  const [showNewPost, setShowNewPost] = useState(false);
-  const [newPost, setNewPost] = useState({ titulo: '', conteudo: '', pinned: false });
-  const [editingPost, setEditingPost] = useState<MuralPost | null>(null);
+  // Estados para RH
+  const [postsMural, setPostsMural] = useState<PostMural[]>([]);
+  const [showRHModal, setShowRHModal] = useState(false);
+  const [rhModalMode, setRhModalMode] = useState<'create' | 'edit'>('create');
+  const [selectedPost, setSelectedPost] = useState<PostMural | null>(null);
+  const [rhFormData, setRhFormData] = useState({
+    titulo: '',
+    conteudo: '',
+    pinned: false
+  });
 
-  // Config state
-  const [config, setConfig] = useState<Record<string, any>>({});
-  const [newConfigKey, setNewConfigKey] = useState('');
-  const [newConfigValue, setNewConfigValue] = useState('');
+  // Estados para Configurações
+  const [systemConfig, setSystemConfig] = useState<Record<string, any>>({});
+  const [configFormData, setConfigFormData] = useState<Record<string, string>>({});
 
-  // Cardapio import state
-  const [cardapioData, setCardapioData] = useState({
+  // Estados para Cardápio
+  const [cardapioFile, setCardapioFile] = useState<File | null>(null);
+  const [cardapioFormData, setCardapioFormData] = useState({
     mes: '',
-    tipo: 'padrao' as 'padrao' | 'light',
-    dados: ''
+    tipo: 'padrao' as 'padrao' | 'light'
   });
 
-  useEffect(() => {
-    if (hasAccess && activeTab) {
-      if (activeTab === 'usuarios' && isAdmin) loadUsers();
-      if (activeTab === 'ti' && isTI) loadTISolicitacoes();
-      if (activeTab === 'mural' && isRH) loadMuralPosts();
-      if (activeTab === 'config' && isAdmin) loadConfig();
-      if (activeTab === 'minhas-solicitacoes') loadMinhasSolicitacoes();
-    }
-  }, [activeTab, hasAccess, isAdmin, isTI, isRH]);
+  // Verificar permissões
+  const isAdmin = user?.role === 'admin';
+  const isRH = user?.role === 'rh' || isAdmin;
+  const isTI = user?.role === 'ti' || isAdmin;
 
-  const loadUsers = async () => {
-    setLoading(true);
+  // Definir abas disponíveis baseado no role
+  const availableTabs = [
+    { id: 'usuarios', label: 'Usuários', icon: Users, roles: ['admin', 'rh'] },
+    { id: 'relatorios', label: 'Relatórios', icon: BarChart3, roles: ['admin', 'rh', 'ti'] },
+    { id: 'configuracoes', label: 'Configurações', icon: Settings, roles: ['admin'] },
+    { id: 'ti', label: 'Painel TI', icon: Settings, roles: ['admin', 'ti'] },
+    { id: 'rh', label: 'Painel RH', icon: Briefcase, roles: ['admin', 'rh'] },
+    { id: 'cardapio', label: 'Cardápio', icon: UtensilsCrossed, roles: ['admin', 'rh'] }
+  ].filter(tab => tab.roles.includes(user?.role || ''));
+
+  // Definir tab ativo inicial
+  useEffect(() => {
+    if (availableTabs.length > 0) {
+      setActiveTab(availableTabs[0].id);
+    }
+  }, []);
+
+  // Carregar dados
+  useEffect(() => {
+    if (activeTab === 'usuarios' && (isAdmin || isRH)) {
+      loadUsuarios();
+    } else if (activeTab === 'ti' && isTI) {
+      loadSolicitacoesTI();
+    } else if (activeTab === 'rh' && isRH) {
+      loadPostsMural();
+    } else if (activeTab === 'configuracoes' && isAdmin) {
+      loadSystemConfig();
+    }
+  }, [activeTab]);
+
+  // ============ FUNÇÕES DE USUÁRIOS ============
+  const loadUsuarios = async () => {
     try {
+      setLoading(true);
       const response = await fetch(`${API_BASE}/api/admin/users`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        setUsers(data.users || []);
-      } else {
-        toast.error('Erro ao carregar usuários');
+        setUsuarios(data.users || []);
       }
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
@@ -156,15 +187,138 @@ export const Painel: React.FC = () => {
     }
   };
 
-  const loadTISolicitacoes = async () => {
-    setLoading(true);
+  const openUserModal = (mode: 'create' | 'edit', usuario?: Usuario) => {
+    setUserModalMode(mode);
+    setSelectedUser(usuario || null);
+    
+    if (mode === 'edit' && usuario) {
+      setUserFormData({
+        nome: usuario.nome,
+        email: usuario.email,
+        setor: usuario.setor,
+        role: usuario.role,
+        senha: '',
+        ativo: usuario.ativo
+      });
+    } else {
+      setUserFormData({
+        nome: '',
+        email: '',
+        setor: 'Geral',
+        role: 'colaborador',
+        senha: '',
+        ativo: true
+      });
+    }
+    setShowUserModal(true);
+  };
+
+  const handleUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!userFormData.nome || !userFormData.email || (userModalMode === 'create' && !userFormData.senha)) {
+      toast.error('Preencha todos os campos obrigatórios!');
+      return;
+    }
+
     try {
+      setLoading(true);
+      if (userModalMode === 'create') {
+        const response = await fetch(`${API_BASE}/api/admin/users`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(userFormData)
+        });
+
+        if (response.ok) {
+          toast.success('Usuário criado com sucesso!');
+          loadUsuarios();
+          setShowUserModal(false);
+        } else {
+          const error = await response.json();
+          toast.error(error.error || 'Erro ao criar usuário');
+        }
+      } else if (selectedUser) {
+        const response = await fetch(`${API_BASE}/api/admin/users/${selectedUser.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            nome: userFormData.nome,
+            email: userFormData.email,
+            setor: userFormData.setor,
+            role: userFormData.role,
+            ativo: userFormData.ativo
+          })
+        });
+
+        if (response.ok) {
+          toast.success('Usuário atualizado com sucesso!');
+          loadUsuarios();
+          setShowUserModal(false);
+        } else {
+          const error = await response.json();
+          toast.error(error.error || 'Erro ao atualizar usuário');
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao salvar usuário:', error);
+      toast.error('Erro ao salvar usuário');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordReset = async (userId: string) => {
+    const novaSenha = prompt('Digite a nova senha:');
+    if (!novaSenha) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users/${userId}/password`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ senha: novaSenha })
+      });
+
+      if (response.ok) {
+        toast.success('Senha alterada com sucesso!');
+      } else {
+        const error = await response.json();
+        toast.error(error.error || 'Erro ao alterar senha');
+      }
+    } catch (error) {
+      toast.error('Erro ao alterar senha');
+    }
+  };
+
+  const handleToggleUserStatus = async (userId: string, currentStatus: boolean) => {
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ativo: !currentStatus })
+      });
+
+      if (response.ok) {
+        toast.success(`Usuário ${!currentStatus ? 'ativado' : 'desativado'} com sucesso!`);
+        loadUsuarios();
+      }
+    } catch (error) {
+      toast.error('Erro ao alterar status');
+    }
+  };
+
+  // ============ FUNÇÕES DE TI ============
+  const loadSolicitacoesTI = async () => {
+    try {
+      setLoading(true);
       const response = await fetch(`${API_BASE}/api/ti/solicitacoes`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        setTiSolicitacoes(data.solicitacoes || []);
-      } else {
-        toast.error('Erro ao carregar solicitações TI');
+        setSolicitacoesTI(data.solicitacoes || []);
       }
     } catch (error) {
       console.error('Erro ao carregar solicitações TI:', error);
@@ -174,33 +328,63 @@ export const Painel: React.FC = () => {
     }
   };
 
-  const loadMinhasSolicitacoes = async () => {
-    setLoading(true);
+  const handleTISubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!tiFormData.titulo) {
+      toast.error('Título é obrigatório!');
+      return;
+    }
+
     try {
-      const response = await fetch(`${API_BASE}/api/ti/minhas`, { credentials: 'include' });
+      setLoading(true);
+      const response = await fetch(`${API_BASE}/api/ti/solicitacoes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(tiFormData)
+      });
+
       if (response.ok) {
-        const data = await response.json();
-        setMinhasSolicitacoes(data.solicitacoes || []);
-      } else {
-        toast.error('Erro ao carregar minhas solicitações');
+        toast.success('Solicitação criada com sucesso!');
+        loadSolicitacoesTI();
+        setTiFormData({ titulo: '', descricao: '' });
+        setShowTIModal(false);
       }
     } catch (error) {
-      console.error('Erro ao carregar minhas solicitações:', error);
-      toast.error('Erro ao carregar minhas solicitações');
+      toast.error('Erro ao criar solicitação');
     } finally {
       setLoading(false);
     }
   };
 
-  const loadMuralPosts = async () => {
-    setLoading(true);
+  const handleTIStatusUpdate = async (solicitacaoId: string, novoStatus: string) => {
     try {
+      const response = await fetch(`${API_BASE}/api/ti/solicitacoes/${solicitacaoId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: novoStatus })
+      });
+
+      if (response.ok) {
+        toast.success('Status atualizado com sucesso!');
+        loadSolicitacoesTI();
+      }
+    } catch (error) {
+      toast.error('Erro ao atualizar status');
+    }
+  };
+
+  // ============ FUNÇÕES DE RH ============
+  const loadPostsMural = async () => {
+    try {
+      setLoading(true);
+      // Usar a rota existente do mural para carregar posts
       const response = await fetch(`${API_BASE}/api/mural/posts`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        setMuralPosts(data.posts || []);
-      } else {
-        toast.error('Erro ao carregar posts do mural');
+        setPostsMural(data.posts || []);
       }
     } catch (error) {
       console.error('Erro ao carregar posts do mural:', error);
@@ -210,15 +394,99 @@ export const Painel: React.FC = () => {
     }
   };
 
-  const loadConfig = async () => {
-    setLoading(true);
+  const openRHModal = (mode: 'create' | 'edit', post?: PostMural) => {
+    setRhModalMode(mode);
+    setSelectedPost(post || null);
+    
+    if (mode === 'edit' && post) {
+      setRhFormData({
+        titulo: post.titulo,
+        conteudo: post.conteudo,
+        pinned: post.pinned
+      });
+    } else {
+      setRhFormData({
+        titulo: '',
+        conteudo: '',
+        pinned: false
+      });
+    }
+    setShowRHModal(true);
+  };
+
+  const handleRHSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!rhFormData.titulo || !rhFormData.conteudo) {
+      toast.error('Título e conteúdo são obrigatórios!');
+      return;
+    }
+
     try {
+      setLoading(true);
+      if (rhModalMode === 'create') {
+        const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(rhFormData)
+        });
+
+        if (response.ok) {
+          toast.success('Post criado com sucesso!');
+          loadPostsMural();
+          setShowRHModal(false);
+        }
+      } else if (selectedPost) {
+        const response = await fetch(`${API_BASE}/api/rh/mural/posts/${selectedPost.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(rhFormData)
+        });
+
+        if (response.ok) {
+          toast.success('Post atualizado com sucesso!');
+          loadPostsMural();
+          setShowRHModal(false);
+        }
+      }
+    } catch (error) {
+      toast.error('Erro ao salvar post');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!confirm('Tem certeza que deseja deletar este post?')) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/rh/mural/posts/${postId}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        toast.success('Post deletado com sucesso!');
+        loadPostsMural();
+      }
+    } catch (error) {
+      toast.error('Erro ao deletar post');
+    }
+  };
+
+  // ============ FUNÇÕES DE CONFIGURAÇÕES ============
+  const loadSystemConfig = async () => {
+    try {
+      setLoading(true);
       const response = await fetch(`${API_BASE}/api/admin/config`, { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        setConfig(data.config || {});
-      } else {
-        toast.error('Erro ao carregar configurações');
+        setSystemConfig(data.config || {});
+        setConfigFormData(Object.fromEntries(
+          Object.entries(data.config || {}).map(([k, v]) => [k, String(v)])
+        ));
       }
     } catch (error) {
       console.error('Erro ao carregar configurações:', error);
@@ -228,734 +496,277 @@ export const Painel: React.FC = () => {
     }
   };
 
-  const handleCreateUser = async (e: React.FormEvent) => {
+  const handleConfigSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/admin/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(newUser)
-      });
-
-      if (response.ok) {
-        toast.success('Usuário criado com sucesso!');
-        setShowAddUserModal(false);
-        setNewUser({ nome: '', email: '', setor: '', role: 'colaborador', senha: '' });
-        loadUsers();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Erro ao criar usuário');
-      }
-    } catch (error) {
-      toast.error('Erro ao criar usuário');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdateUserStatus = async (userId: number, ativo: number) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ ativo })
-      });
-
-      if (response.ok) {
-        toast.success(ativo ? 'Usuário ativado!' : 'Usuário desativado!');
-        loadUsers();
-      } else {
-        toast.error('Erro ao atualizar usuário');
-      }
-    } catch (error) {
-      toast.error('Erro ao atualizar usuário');
-    }
-  };
-
-  const handleUpdateTISolicitacao = async (id: number, status: string) => {
-    try {
-      const response = await fetch(`${API_BASE}/api/ti/solicitacoes/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ status })
-      });
-
-      if (response.ok) {
-        toast.success('Status atualizado!');
-        loadTISolicitacoes();
-      } else {
-        toast.error('Erro ao atualizar status');
-      }
-    } catch (error) {
-      toast.error('Erro ao atualizar status');
-    }
-  };
-
-  const handleCreateTISolicitacao = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/ti/solicitacoes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(newSolicitacao)
-      });
-
-      if (response.ok) {
-        toast.success('Solicitação criada com sucesso!');
-        setShowNewSolicitacao(false);
-        setNewSolicitacao({ titulo: '', descricao: '' });
-        loadMinhasSolicitacoes();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Erro ao criar solicitação');
-      }
-    } catch (error) {
-      toast.error('Erro ao criar solicitação');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreatePost = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(newPost)
-      });
-
-      if (response.ok) {
-        toast.success('Post criado com sucesso!');
-        setShowNewPost(false);
-        setNewPost({ titulo: '', conteudo: '', pinned: false });
-        loadMuralPosts();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Erro ao criar post');
-      }
-    } catch (error) {
-      toast.error('Erro ao criar post');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpdatePost = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingPost) return;
     
-    setLoading(true);
-
     try {
-      const response = await fetch(`${API_BASE}/api/rh/mural/posts/${editingPost.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          titulo: editingPost.titulo,
-          conteudo: editingPost.conteudo,
-          pinned: editingPost.pinned
-        })
-      });
-
-      if (response.ok) {
-        toast.success('Post atualizado com sucesso!');
-        setEditingPost(null);
-        loadMuralPosts();
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Erro ao atualizar post');
-      }
-    } catch (error) {
-      toast.error('Erro ao atualizar post');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDeletePost = async (postId: number) => {
-    if (!confirm('Tem certeza que deseja excluir este post?')) return;
-
-    try {
-      const response = await fetch(`${API_BASE}/api/rh/mural/posts/${postId}`, {
-        method: 'DELETE',
-        credentials: 'include'
-      });
-
-      if (response.ok) {
-        toast.success('Post excluído com sucesso!');
-        loadMuralPosts();
-      } else {
-        toast.error('Erro ao excluir post');
-      }
-    } catch (error) {
-      toast.error('Erro ao excluir post');
-    }
-  };
-
-  const handleSaveConfig = async () => {
-    if (!newConfigKey || !newConfigValue) {
-      toast.error('Preencha chave e valor');
-      return;
-    }
-
-    try {
-      let parsedValue = newConfigValue;
-      try {
-        parsedValue = JSON.parse(newConfigValue);
-      } catch {
-        // Keep as string if not valid JSON
-      }
-
-      const newConfig = { ...config, [newConfigKey]: parsedValue };
-      
+      setLoading(true);
       const response = await fetch(`${API_BASE}/api/admin/config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify(newConfig)
+        body: JSON.stringify(configFormData)
       });
 
       if (response.ok) {
-        toast.success('Configuração salva!');
-        setConfig(newConfig);
-        setNewConfigKey('');
-        setNewConfigValue('');
-      } else {
-        toast.error('Erro ao salvar configuração');
+        toast.success('Configurações salvas com sucesso!');
+        loadSystemConfig();
       }
     } catch (error) {
-      toast.error('Erro ao salvar configuração');
+      toast.error('Erro ao salvar configurações');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleCardapioImport = async () => {
-    if (!cardapioData.mes || !cardapioData.dados) {
-      toast.error('Preencha mês e dados JSON');
+  // ============ FUNÇÕES DE RELATÓRIOS ============
+  const handleExportCSV = (type: string) => {
+    const baseUrl = `${API_BASE}/api/admin/export`;
+    let url = '';
+    
+    switch (type) {
+      case 'ranking':
+        const month = new Date().toISOString().slice(0, 7);
+        url = `${baseUrl}/ranking.csv?month=${month}`;
+        break;
+      case 'trocas':
+        const from = new Date().toISOString().slice(0, 10);
+        const to = new Date().toISOString().slice(0, 10);
+        url = `${baseUrl}/trocas.csv?from=${from}&to=${to}`;
+        break;
+      case 'portaria':
+        url = `${baseUrl}/portaria.csv`;
+        break;
+      case 'reservas':
+        url = `${baseUrl}/reservas.csv`;
+        break;
+    }
+    
+    if (url) {
+      window.open(url, '_blank');
+    }
+  };
+
+  // ============ FUNÇÕES DE CARDÁPIO ============
+  const handleCardapioSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!cardapioFormData.mes) {
+      toast.error('Selecione o mês!');
       return;
     }
 
     try {
-      const dados = JSON.parse(cardapioData.dados);
+      setLoading(true);
+      let dados = [];
       
+      if (cardapioFile) {
+        const text = await cardapioFile.text();
+        dados = JSON.parse(text);
+      }
+
       const response = await fetch(`${API_BASE}/api/admin/cardapio/import`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
-          mes: cardapioData.mes,
-          tipo: cardapioData.tipo,
+          mes: cardapioFormData.mes,
+          tipo: cardapioFormData.tipo,
           dados
         })
       });
 
       if (response.ok) {
-        const result = await response.json();
-        toast.success(`Cardápio importado: ${result.fileName}`);
-        setCardapioData({ mes: '', tipo: 'padrao', dados: '' });
-      } else {
-        const error = await response.json();
-        toast.error(error.error || 'Erro ao importar cardápio');
+        toast.success('Cardápio importado com sucesso!');
+        setCardapioFile(null);
+        setCardapioFormData({ mes: '', tipo: 'padrao' });
       }
     } catch (error) {
-      toast.error('JSON inválido ou erro na importação');
+      toast.error('Erro ao importar cardápio');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const exportReport = (type: string, fromDate?: string, toDate?: string) => {
-    let url = `${API_BASE}/api/admin/export/${type}.csv`;
-    
-    if (type === 'ranking') {
-      const month = fromDate || (new Date().getFullYear() + '-' + String(new Date().getMonth() + 1).padStart(2, '0'));
-      url += `?month=${month}`;
-    } else if (fromDate && toDate) {
-      url += `?from=${fromDate}&to=${toDate}`;
-    } else {
-      // Default to current month
-      const today = new Date();
-      const thisMonth = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
-      const fromDefault = `${thisMonth}-01`;
-      const toDefault = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-      url += `?from=${fromDefault}&to=${toDefault}`;
-    }
-    
-    try {
-      window.open(url, '_blank');
-      toast.success('Relatório sendo exportado...');
-    } catch (error) {
-      toast.error('Erro ao exportar relatório');
-    }
+  const filteredUsers = usuarios.filter(usuario => 
+    usuario.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    usuario.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    usuario.setor.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const getRoleInfo = (role: string) => {
+    return ROLES.find(r => r.value === role) || ROLES[0];
   };
 
-  if (!hasAccess) {
+  if (availableTabs.length === 0) {
     return (
       <Layout>
         <div className="flex items-center justify-center h-64">
           <div className="text-center">
-            <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <Shield className="w-16 h-16 text-gray-400 mx-auto mb-4" />
             <h2 className="text-xl font-semibold text-gray-900 mb-2">Acesso Restrito</h2>
-            <p className="text-gray-600">Você não tem permissão para acessar este painel.</p>
+            <p className="text-gray-600">Você não tem permissão para acessar esta página.</p>
           </div>
         </div>
       </Layout>
     );
   }
 
-  if (!activeTab) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        </div>
-      </Layout>
-    );
-  }
-
-  const tabs = [
-    { id: 'usuarios', label: 'Usuários', icon: Users, show: isAdmin },
-    { id: 'relatorios', label: 'Relatórios', icon: Download, show: isAdmin || isRH },
-    { id: 'config', label: 'Configurações', icon: Settings, show: isAdmin },
-    { id: 'ti', label: 'Painel TI', icon: Monitor, show: isTI },
-    { id: 'mural', label: 'Painel RH', icon: MessageSquare, show: isRH },
-    { id: 'cardapio', label: 'Cardápio', icon: UtensilsCrossed, show: isRH },
-    { id: 'minhas-solicitacoes', label: 'Minhas Solicitações', icon: Clock, show: hasAccess && !isAdmin && !isRH && !isTI }
-  ].filter(tab => tab.show);
-
   return (
     <Layout>
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold text-gray-900">Painel Administrativo</h1>
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold text-gray-900">Painel Administrativo</h1>
+        </div>
 
         {/* Tabs */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <nav className="flex space-x-1">
-            {tabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
-                  activeTab === tab.id
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                }`}
-              >
-                <tab.icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </button>
-            ))}
+            {availableTabs.map(tab => {
+              const IconComponent = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                    activeTab === tab.id
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                  }`}
+                >
+                  <IconComponent className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </nav>
         </div>
 
         {/* Tab Content */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          {loading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-            </div>
-          )}
-
-          {/* Users Tab */}
-          {activeTab === 'usuarios' && isAdmin && (
+        <div className="space-y-6">
+          {/* Usuários Tab */}
+          {activeTab === 'usuarios' && (isAdmin || isRH) && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">Gerenciamento de Usuários</h2>
                 <button
-                  onClick={() => setShowAddUserModal(true)}
+                  onClick={() => openUserModal('create')}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>Adicionar Usuário</span>
+                  <UserPlus className="w-4 h-4" />
+                  <span>Novo Usuário</span>
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Nome</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Email</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Setor</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Role</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Pontos</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map(user => (
-                      <tr key={user.id} className="border-b border-gray-100">
-                        <td className="py-3 px-4">{user.nome}</td>
-                        <td className="py-3 px-4">{user.email}</td>
-                        <td className="py-3 px-4">{user.setor}</td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            user.role === 'admin' ? 'bg-red-100 text-red-800' :
-                            user.role === 'rh' ? 'bg-blue-100 text-blue-800' :
-                            user.role === 'ti' ? 'bg-green-100 text-green-800' :
-                            'bg-gray-100 text-gray-800'
-                          }`}>
-                            {user.role}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">{user.total_pontos_mensal}</td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            user.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          }`}>
-                            {user.ativo ? 'Ativo' : 'Inativo'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <button
-                            onClick={() => handleUpdateUserStatus(user.id, user.ativo ? 0 : 1)}
-                            className={`text-sm px-3 py-1 rounded ${
-                              user.ativo ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'
-                            }`}
-                          >
-                            {user.ativo ? 'Desativar' : 'Ativar'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* Reports Tab */}
-          {activeTab === 'relatorios' && (isAdmin || isRH || isTI) && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-900">Relatórios e Exportações</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-2">Trocas de Proteína</h3>
-                  <p className="text-sm text-gray-600 mb-3">Exportar trocas de proteína do mês atual</p>
-                  <button
-                    onClick={() => exportReport('trocas')}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Exportar CSV</span>
-                  </button>
-                </div>
-
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-2">Ranking Mensal</h3>
-                  <p className="text-sm text-gray-600 mb-3">Exportar ranking de pontos do mês</p>
-                  <button
-                    onClick={() => exportReport('ranking')}
-                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center space-x-2"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Exportar CSV</span>
-                  </button>
-                </div>
-
-                {(isAdmin || isRH) && (
-                  <div className="p-4 border border-gray-200 rounded-lg">
-                    <h3 className="font-medium text-gray-900 mb-2">Agendamentos Portaria</h3>
-                    <p className="text-sm text-gray-600 mb-3">Exportar agendamentos da portaria</p>
-                    <button
-                      onClick={() => exportReport('portaria')}
-                      className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center space-x-2"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Exportar CSV</span>
-                    </button>
-                  </div>
-                )}
-
-                {(isAdmin || isRH) && (
-                  <div className="p-4 border border-gray-200 rounded-lg">
-                    <h3 className="font-medium text-gray-900 mb-2">Reservas de Salas</h3>
-                    <p className="text-sm text-gray-600 mb-3">Exportar reservas de salas</p>
-                    <button
-                      onClick={() => exportReport('reservas')}
-                      className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors flex items-center space-x-2"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Exportar CSV</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Config Tab */}
-          {activeTab === 'config' && isAdmin && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-900">Configurações do Sistema</h2>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="font-medium text-gray-900 mb-4">Adicionar/Editar Configuração</h3>
-                  <div className="space-y-4">
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <div className="mb-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                     <input
                       type="text"
-                      value={newConfigKey}
-                      onChange={(e) => setNewConfigKey(e.target.value)}
-                      placeholder="Chave da configuração"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Buscar usuários..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
-                    <textarea
-                      value={newConfigValue}
-                      onChange={(e) => setNewConfigValue(e.target.value)}
-                      placeholder="Valor (pode ser JSON)"
-                      rows={3}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <button
-                      onClick={handleSaveConfig}
-                      className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <Save className="w-4 h-4" />
-                      <span>Salvar</span>
-                    </button>
                   </div>
                 </div>
 
-                <div>
-                  <h3 className="font-medium text-gray-900 mb-4">Configurações Existentes</h3>
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {Object.entries(config).map(([key, value]) => (
-                      <div key={key} className="p-3 bg-gray-50 rounded-lg">
-                        <div className="font-medium text-sm text-gray-900">{key}</div>
-                        <div className="text-xs text-gray-600 mt-1 break-all">
-                          {typeof value === 'object' ? JSON.stringify(value) : String(value)}
-                        </div>
-                      </div>
-                    ))}
-                    {Object.keys(config).length === 0 && (
-                      <div className="text-center py-8 text-gray-500">
-                        <Settings className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                        <p>Nenhuma configuração encontrada</p>
-                      </div>
-                    )}
+                {loading ? (
+                  <div className="p-8 text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
                   </div>
-                </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nome</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Setor</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Função</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pontos</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {filteredUsers.map((usuario) => {
+                          const roleInfo = getRoleInfo(usuario.role);
+                          const IconComponent = roleInfo.icon;
+                          
+                          return (
+                            <tr key={usuario.id} className="hover:bg-gray-50">
+                              <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">
+                                {usuario.nome}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {usuario.email}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                {usuario.setor}
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleInfo.color}`}>
+                                  <IconComponent className="w-3 h-3 mr-1" />
+                                  {roleInfo.label}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap">
+                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                                  usuario.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                                }`}>
+                                  {usuario.ativo ? 'Ativo' : 'Inativo'}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                <div className="flex items-center">
+                                  <Star className="w-4 h-4 text-yellow-500 mr-1" />
+                                  {usuario.total_pontos_mensal || 0}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                <button
+                                  onClick={() => openUserModal('edit', usuario)}
+                                  className="text-blue-600 hover:text-blue-900 p-1"
+                                  title="Editar"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handlePasswordReset(usuario.id)}
+                                  className="text-orange-600 hover:text-orange-900 p-1"
+                                  title="Resetar Senha"
+                                >
+                                  <Shield className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleToggleUserStatus(usuario.id, usuario.ativo)}
+                                  className={`p-1 ${usuario.ativo ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}`}
+                                  title={usuario.ativo ? 'Desativar' : 'Ativar'}
+                                >
+                                  {usuario.ativo ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* TI Panel Tab */}
+          {/* Painel TI Tab */}
           {activeTab === 'ti' && isTI && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Solicitações TI</h2>
-                <div className="flex space-x-2">
-                  <button
-                    onClick={loadTISolicitacoes}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Atualizar
-                  </button>
-                </div>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Título</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Solicitante</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Data</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tiSolicitacoes.map(solicitacao => (
-                      <tr key={solicitacao.id} className="border-b border-gray-100">
-                        <td className="py-3 px-4">{solicitacao.titulo}</td>
-                        <td className="py-3 px-4">{solicitacao.solicitante_nome}</td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                            solicitacao.status === 'pendente' ? 'bg-yellow-100 text-yellow-800' :
-                            solicitacao.status === 'aprovado' ? 'bg-green-100 text-green-800' :
-                            'bg-red-100 text-red-800'
-                          }`}>
-                            {solicitacao.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">{new Date(solicitacao.created_at).toLocaleDateString('pt-BR')}</td>
-                        <td className="py-3 px-4">
-                          <div className="flex space-x-2">
-                            <button
-                              onClick={() => handleUpdateTISolicitacao(solicitacao.id, 'aprovado')}
-                              className="text-green-600 hover:bg-green-50 px-2 py-1 rounded text-sm"
-                            >
-                              <CheckCircle className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleUpdateTISolicitacao(solicitacao.id, 'reprovado')}
-                              className="text-red-600 hover:bg-red-50 px-2 py-1 rounded text-sm"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {tiSolicitacoes.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-gray-500">
-                          <Monitor className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                          <p>Nenhuma solicitação encontrada</p>
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* RH Mural Panel Tab */}
-          {activeTab === 'mural' && isRH && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Gerenciar Posts do Mural</h2>
+                <h2 className="text-xl font-semibold text-gray-900">Painel TI</h2>
                 <button
-                  onClick={() => setShowNewPost(true)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Novo Post</span>
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {muralPosts.map(post => (
-                  <div key={post.id} className="p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{post.titulo}</h3>
-                        <p className="text-sm text-gray-600">Por {post.author} • {new Date(post.created_at).toLocaleDateString('pt-BR')}</p>
-                        {post.pinned === 1 && (
-                          <span className="inline-block px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full mt-1">Fixado</span>
-                        )}
-                      </div>
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => setEditingPost(post)}
-                          className="text-blue-600 hover:bg-blue-50 p-1 rounded"
-                        >
-                          <Edit className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeletePost(post.id)}
-                          className="text-red-600 hover:bg-red-50 p-1 rounded"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                    <p className="text-gray-700">{post.conteudo}</p>
-                  </div>
-                ))}
-                {muralPosts.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    <MessageSquare className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                    <p>Nenhum post encontrado</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Cardapio Tab */}
-          {activeTab === 'cardapio' && isRH && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-900">Gerenciar Cardápio</h2>
-              
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-4">Importar Cardápio</h3>
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Mês (YYYY-MM)</label>
-                        <input
-                          type="month"
-                          value={cardapioData.mes}
-                          onChange={(e) => setCardapioData({...cardapioData, mes: e.target.value})}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">Tipo</label>
-                        <select
-                          value={cardapioData.tipo}
-                          onChange={(e) => setCardapioData({...cardapioData, tipo: e.target.value as 'padrao' | 'light'})}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        >
-                          <option value="padrao">Padrão</option>
-                          <option value="light">Light</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Dados JSON</label>
-                      <textarea
-                        value={cardapioData.dados}
-                        onChange={(e) => setCardapioData({...cardapioData, dados: e.target.value})}
-                        placeholder='[{"data": "01/08/2025", "proteina": "Frango", ...}]'
-                        rows={6}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent font-mono text-sm"
-                      />
-                    </div>
-                    <button
-                      onClick={handleCardapioImport}
-                      className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <Upload className="w-4 h-4" />
-                      <span>Importar Cardápio</span>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-4 border border-gray-200 rounded-lg">
-                  <h3 className="font-medium text-gray-900 mb-4">Exportar Dados</h3>
-                  <div className="space-y-4">
-                    <button
-                      onClick={() => exportReport('trocas')}
-                      className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Exportar Trocas de Proteína (CSV)</span>
-                    </button>
-                    
-                    <p className="text-sm text-gray-600">
-                      O relatório incluirá todas as trocas de proteína solicitadas pelos funcionários no período atual.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* My Requests Tab */}
-          {activeTab === 'minhas-solicitacoes' && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Minhas Solicitações TI</h2>
-                <button
-                  onClick={() => setShowNewSolicitacao(true)}
+                  onClick={() => setShowTIModal(true)}
                   className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
                 >
                   <Plus className="w-4 h-4" />
@@ -963,191 +774,389 @@ export const Painel: React.FC = () => {
                 </button>
               </div>
 
-              <div className="space-y-4">
-                {minhasSolicitacoes.map(solicitacao => (
-                  <div key={solicitacao.id} className="p-4 border border-gray-200 rounded-lg">
-                    <div className="flex items-start justify-between mb-2">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{solicitacao.titulo}</h3>
-                        <p className="text-sm text-gray-600">{new Date(solicitacao.created_at).toLocaleDateString('pt-BR')}</p>
-                      </div>
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                        solicitacao.status === 'pendente' ? 'bg-yellow-100 text-yellow-800' :
-                        solicitacao.status === 'aprovado' ? 'bg-green-100 text-green-800' :
-                        'bg-red-100 text-red-800'
-                      }`}>
-                        {solicitacao.status}
-                      </span>
-                    </div>
-                    <p className="text-gray-700">{solicitacao.descricao}</p>
-                    {solicitacao.responsavel_nome && (
-                      <p className="text-sm text-gray-500 mt-2">Responsável: {solicitacao.responsavel_nome}</p>
-                    )}
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                {loading ? (
+                  <div className="p-8 text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
                   </div>
-                ))}
-                {minhasSolicitacoes.length === 0 && (
-                  <div className="text-center py-8 text-gray-500">
-                    <Clock className="w-12 h-12 mx-auto mb-4 text-gray-400" />
-                    <p>Nenhuma solicitação encontrada</p>
+                ) : (
+                  <div className="space-y-4">
+                    {solicitacoesTI.map((solicitacao) => (
+                      <div key={solicitacao.id} className="p-4 border border-gray-200 rounded-lg">
+                        <div className="flex items-start justify-between mb-2">
+                          <h3 className="font-semibold text-gray-900">{solicitacao.titulo}</h3>
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${STATUS_COLORS[solicitacao.status]}`}>
+                            {solicitacao.status}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-3">{solicitacao.descricao}</p>
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <span>Solicitante: {solicitacao.solicitante_nome}</span>
+                          <span>{new Date(solicitacao.created_at).toLocaleDateString('pt-BR')}</span>
+                        </div>
+                        {isTI && solicitacao.status === 'pendente' && (
+                          <div className="mt-3 flex space-x-2">
+                            <button
+                              onClick={() => handleTIStatusUpdate(solicitacao.id, 'aprovada')}
+                              className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                            >
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() => handleTIStatusUpdate(solicitacao.id, 'rejeitada')}
+                              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+                            >
+                              Rejeitar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             </div>
           )}
+
+          {/* Painel RH Tab */}
+          {activeTab === 'rh' && isRH && (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900">Painel RH - Mural</h2>
+                <button
+                  onClick={() => openRHModal('create')}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Novo Post</span>
+                </button>
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                {loading ? (
+                  <div className="p-8 text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {postsMural.map((post) => (
+                      <div key={post.id} className="p-4 border border-gray-200 rounded-lg">
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="flex items-center space-x-2">
+                            <h3 className="font-semibold text-gray-900">{post.titulo}</h3>
+                            {post.pinned && (
+                              <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                                Fixado
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex space-x-2">
+                            <button
+                              onClick={() => openRHModal('edit', post)}
+                              className="text-blue-600 hover:text-blue-800 p-1"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePost(post.id)}
+                              className="text-red-600 hover:text-red-800 p-1"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-2">{post.conteudo}</p>
+                        <div className="text-xs text-gray-500">
+                          Por: {post.author} • {new Date(post.created_at).toLocaleDateString('pt-BR')}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Relatórios Tab */}
+          {activeTab === 'relatorios' && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold text-gray-900">Relatórios</h2>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-900 mb-4">Ranking Mensal</h3>
+                  <button
+                    onClick={() => handleExportCSV('ranking')}
+                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Exportar CSV</span>
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-900 mb-4">Trocas de Proteína</h3>
+                  <button
+                    onClick={() => handleExportCSV('trocas')}
+                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Exportar CSV</span>
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-900 mb-4">Portaria</h3>
+                  <button
+                    onClick={() => handleExportCSV('portaria')}
+                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Exportar CSV</span>
+                  </button>
+                </div>
+
+                <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <h3 className="font-semibold text-gray-900 mb-4">Reservas de Salas</h3>
+                  <button
+                    onClick={() => handleExportCSV('reservas')}
+                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Exportar CSV</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Configurações Tab */}
+          {activeTab === 'configuracoes' && isAdmin && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold text-gray-900">Configurações do Sistema</h2>
+              
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <form onSubmit={handleConfigSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nome do Sistema
+                    </label>
+                    <input
+                      type="text"
+                      value={configFormData.sistema_nome || ''}
+                      onChange={(e) => setConfigFormData({...configFormData, sistema_nome: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="Intranet Grupo Cropfield"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Email de Suporte
+                    </label>
+                    <input
+                      type="email"
+                      value={configFormData.suporte_email || ''}
+                      onChange={(e) => setConfigFormData({...configFormData, suporte_email: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      placeholder="suporte@grupocropfield.com.br"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {loading ? 'Salvando...' : 'Salvar Configurações'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {/* Cardápio Tab */}
+          {activeTab === 'cardapio' && (isAdmin || isRH) && (
+            <div className="space-y-6">
+              <h2 className="text-xl font-semibold text-gray-900">Gerenciamento do Cardápio</h2>
+              
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <form onSubmit={handleCardapioSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Mês (YYYY-MM)
+                      </label>
+                      <input
+                        type="month"
+                        value={cardapioFormData.mes}
+                        onChange={(e) => setCardapioFormData({...cardapioFormData, mes: e.target.value})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Tipo
+                      </label>
+                      <select
+                        value={cardapioFormData.tipo}
+                        onChange={(e) => setCardapioFormData({...cardapioFormData, tipo: e.target.value as 'padrao' | 'light'})}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      >
+                        <option value="padrao">Padrão</option>
+                        <option value="light">Light</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Arquivo JSON do Cardápio
+                    </label>
+                    <input
+                      type="file"
+                      accept=".json"
+                      onChange={(e) => setCardapioFile(e.target.files?.[0] || null)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || !cardapioFormData.mes}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>{loading ? 'Importando...' : 'Importar Cardápio'}</span>
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Modals */}
-        
-        {/* Add User Modal */}
-        {showAddUserModal && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+        {/* User Modal */}
+        {showUserModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
               <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">Adicionar Usuário</h2>
-                <form onSubmit={handleCreateUser} className="space-y-4">
-                  <input
-                    type="text"
-                    value={newUser.nome}
-                    onChange={(e) => setNewUser({...newUser, nome: e.target.value})}
-                    placeholder="Nome completo"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <input
-                    type="email"
-                    value={newUser.email}
-                    onChange={(e) => setNewUser({...newUser, email: e.target.value})}
-                    placeholder="Email"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <input
-                    type="text"
-                    value={newUser.setor}
-                    onChange={(e) => setNewUser({...newUser, setor: e.target.value})}
-                    placeholder="Setor"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <select
-                    value={newUser.role}
-                    onChange={(e) => setNewUser({...newUser, role: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {userModalMode === 'create' ? 'Novo Usuário' : 'Editar Usuário'}
+                  </h2>
+                  <button
+                    onClick={() => setShowUserModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
                   >
-                    <option value="colaborador">Colaborador</option>
-                    <option value="rh">RH</option>
-                    <option value="ti">TI</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                  <input
-                    type="password"
-                    value={newUser.senha}
-                    onChange={(e) => setNewUser({...newUser, senha: e.target.value})}
-                    placeholder="Senha"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <div className="flex space-x-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowAddUserModal(false)}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                    >
-                      {loading ? 'Criando...' : 'Criar'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
 
-        {/* New TI Request Modal */}
-        {showNewSolicitacao && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
-              <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">Nova Solicitação TI</h2>
-                <form onSubmit={handleCreateTISolicitacao} className="space-y-4">
-                  <input
-                    type="text"
-                    value={newSolicitacao.titulo}
-                    onChange={(e) => setNewSolicitacao({...newSolicitacao, titulo: e.target.value})}
-                    placeholder="Título da solicitação"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <textarea
-                    value={newSolicitacao.descricao}
-                    onChange={(e) => setNewSolicitacao({...newSolicitacao, descricao: e.target.value})}
-                    placeholder="Descrição detalhada"
-                    rows={4}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <div className="flex space-x-3 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setShowNewSolicitacao(false)}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={loading}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-                    >
-                      {loading ? 'Criando...' : 'Criar'}
-                    </button>
+                <form onSubmit={handleUserSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Nome Completo *
+                    </label>
+                    <input
+                      type="text"
+                      value={userFormData.nome}
+                      onChange={(e) => setUserFormData({ ...userFormData, nome: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
                   </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* New Post Modal */}
-        {showNewPost && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">Novo Post no Mural</h2>
-                <form onSubmit={handleCreatePost} className="space-y-4">
-                  <input
-                    type="text"
-                    value={newPost.titulo}
-                    onChange={(e) => setNewPost({...newPost, titulo: e.target.value})}
-                    placeholder="Título do post"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <textarea
-                    value={newPost.conteudo}
-                    onChange={(e) => setNewPost({...newPost, conteudo: e.target.value})}
-                    placeholder="Conteúdo do post"
-                    rows={6}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <label className="flex items-center space-x-2">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      E-mail *
+                    </label>
+                    <input
+                      type="email"
+                      value={userFormData.email}
+                      onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Setor
+                    </label>
+                    <select
+                      value={userFormData.setor}
+                      onChange={(e) => setUserFormData({ ...userFormData, setor: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      {SETORES.map(setor => (
+                        <option key={setor} value={setor}>{setor}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Função
+                    </label>
+                    <select
+                      value={userFormData.role}
+                      onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value as Usuario['role'] })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      {ROLES.filter(role => {
+                        if (isAdmin) return true;
+                        return role.value !== 'admin';
+                      }).map(role => (
+                        <option key={role.value} value={role.value}>
+                          {role.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {userModalMode === 'create' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Senha *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showPassword ? 'text' : 'password'}
+                          value={userFormData.senha}
+                          onChange={(e) => setUserFormData({ ...userFormData, senha: e.target.value })}
+                          className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                        >
+                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center space-x-2">
                     <input
                       type="checkbox"
-                      checked={newPost.pinned}
-                      onChange={(e) => setNewPost({...newPost, pinned: e.target.checked})}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      id="ativo"
+                      checked={userFormData.ativo}
+                      onChange={(e) => setUserFormData({ ...userFormData, ativo: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
                     />
-                    <span className="text-sm text-gray-700">Fixar post</span>
-                  </label>
+                    <label htmlFor="ativo" className="text-sm text-gray-700">
+                      Usuário ativo
+                    </label>
+                  </div>
+
                   <div className="flex space-x-3 pt-4">
                     <button
                       type="button"
-                      onClick={() => setShowNewPost(false)}
+                      onClick={() => setShowUserModal(false)}
                       className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                     >
                       Cancelar
@@ -1155,9 +1164,10 @@ export const Painel: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2"
                     >
-                      {loading ? 'Criando...' : 'Criar Post'}
+                      <Save className="w-4 h-4" />
+                      <span>{loading ? 'Salvando...' : (userModalMode === 'create' ? 'Criar' : 'Salvar')}</span>
                     </button>
                   </div>
                 </form>
@@ -1166,42 +1176,51 @@ export const Painel: React.FC = () => {
           </div>
         )}
 
-        {/* Edit Post Modal */}
-        {editingPost && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+        {/* TI Modal */}
+        {showTIModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
               <div className="p-6">
-                <h2 className="text-xl font-semibold text-gray-900 mb-6">Editar Post</h2>
-                <form onSubmit={handleUpdatePost} className="space-y-4">
-                  <input
-                    type="text"
-                    value={editingPost.titulo}
-                    onChange={(e) => setEditingPost({...editingPost, titulo: e.target.value})}
-                    placeholder="Título do post"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <textarea
-                    value={editingPost.conteudo}
-                    onChange={(e) => setEditingPost({...editingPost, conteudo: e.target.value})}
-                    placeholder="Conteúdo do post"
-                    rows={6}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    required
-                  />
-                  <label className="flex items-center space-x-2">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-semibold text-gray-900">Nova Solicitação TI</h2>
+                  <button
+                    onClick={() => setShowTIModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleTISubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Título *
+                    </label>
                     <input
-                      type="checkbox"
-                      checked={editingPost.pinned === 1}
-                      onChange={(e) => setEditingPost({...editingPost, pinned: e.target.checked ? 1 : 0})}
-                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      type="text"
+                      value={tiFormData.titulo}
+                      onChange={(e) => setTiFormData({ ...tiFormData, titulo: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
                     />
-                    <span className="text-sm text-gray-700">Fixar post</span>
-                  </label>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Descrição
+                    </label>
+                    <textarea
+                      value={tiFormData.descricao}
+                      onChange={(e) => setTiFormData({ ...tiFormData, descricao: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      rows={4}
+                    />
+                  </div>
+
                   <div className="flex space-x-3 pt-4">
                     <button
                       type="button"
-                      onClick={() => setEditingPost(null)}
+                      onClick={() => setShowTIModal(false)}
                       className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                     >
                       Cancelar
@@ -1209,9 +1228,88 @@ export const Painel: React.FC = () => {
                     <button
                       type="submit"
                       disabled={loading}
-                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
                     >
-                      {loading ? 'Salvando...' : 'Salvar'}
+                      {loading ? 'Criando...' : 'Criar Solicitação'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* RH Modal */}
+        {showRHModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
+              <div className="p-6">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-semibold text-gray-900">
+                    {rhModalMode === 'create' ? 'Novo Post' : 'Editar Post'}
+                  </h2>
+                  <button
+                    onClick={() => setShowRHModal(false)}
+                    className="text-gray-400 hover:text-gray-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <form onSubmit={handleRHSubmit} className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Título *
+                    </label>
+                    <input
+                      type="text"
+                      value={rhFormData.titulo}
+                      onChange={(e) => setRhFormData({ ...rhFormData, titulo: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Conteúdo *
+                    </label>
+                    <textarea
+                      value={rhFormData.conteudo}
+                      onChange={(e) => setRhFormData({ ...rhFormData, conteudo: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      rows={6}
+                      required
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="pinned"
+                      checked={rhFormData.pinned}
+                      onChange={(e) => setRhFormData({ ...rhFormData, pinned: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="pinned" className="text-sm text-gray-700">
+                      Fixar post no topo
+                    </label>
+                  </div>
+
+                  <div className="flex space-x-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setShowRHModal(false)}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      {loading ? 'Salvando...' : (rhModalMode === 'create' ? 'Criar Post' : 'Salvar')}
                     </button>
                   </div>
                 </form>
