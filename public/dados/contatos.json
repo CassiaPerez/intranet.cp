@@ -1,0 +1,142 @@
+{
+  "representantes": [
+    {
+      "id": "rep1",
+      "nome": "João Silva",
+      "cargo": "Representante Comercial",
+      "setor": "Erechim - RS",
+      "email": "joao.silva@grupocropfield.com.br",
+      "telefone": "(54) 99999-0001",
+      "localizacao": "Erechim - RS",
+      "razaoSocial": "Cropfield Representações Ltda",
+      "ramal": "101",
+      "foto": "https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150"
+    },
+    {
+      "id": "rep2",
+      "nome": "Maria Santos",
+      "cargo": "Representante Comercial",
+      "setor": "Caxias do Sul - RS",
+      "email": "maria.santos@grupocropfield.com.br",
+      "telefone": "(54) 99999-0002",
+      "localizacao": "Caxias do Sul - RS",
+      "razaoSocial": "Cropfield Representações Ltda",
+      "ramal": "102",
+      "foto": "https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=150"
+    },
+    {
+      "id": "rep3",
+      "nome": "Carlos Oliveira",
+      "cargo": "Representante Comercial",
+      "setor": "Passo Fundo - RS",
+      "email": "carlos.oliveira@grupocropfield.com.br",
+      "telefone": "(54) 99999-0003",
+      "localizacao": "Passo Fundo - RS",
+      "razaoSocial": "Cropfield Representações Ltda",
+      "ramal": "103",
+      "foto": "https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?w=150"
+    },
+    {
+      "id": "rep4",
+      "nome": "Ana Costa",
+      "cargo": "Representante Comercial",
+      "setor": "Santa Maria - RS",
+      "email": "ana.costa@grupocropfield.com.br",
+      "telefone": "(55) 99999-0004",
+      "localizacao": "Santa Maria - RS",
+      "razaoSocial": "Cropfield Representações Ltda",
+      "ramal": "104",
+      "foto": "https://images.pexels.com/photos/1130626/pexels-photo-1130626.jpeg?w=150"
+    }
+  ],
+  "equipe_apucarana_pr": [
+    {
+      "id": "eq1",
+      "nome": "Pedro Henrique",
+      "cargo": "Gerente Geral",
+      "setor": "Administração",
+      "email": "pedro.henrique@grupocropfield.com.br",
+      "telefone": "(43) 3422-0001",
+      "ramal": "201",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/2379005/pexels-photo-2379005.jpeg?w=150"
+    },
+    {
+      "id": "eq2",
+      "nome": "Lucia Fernandes",
+      "cargo": "Coordenadora de RH",
+      "setor": "RH",
+      "email": "lucia.fernandes@grupocropfield.com.br",
+      "telefone": "(43) 3422-0002",
+      "ramal": "202",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1181519/pexels-photo-1181519.jpeg?w=150"
+    },
+    {
+      "id": "eq3",
+      "nome": "Rafael Santos",
+      "cargo": "Analista de TI",
+      "setor": "TI",
+      "email": "rafael.santos@grupocropfield.com.br",
+      "telefone": "(43) 3422-0003",
+      "ramal": "203",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1043474/pexels-photo-1043474.jpeg?w=150"
+    },
+    {
+      "id": "eq4",
+      "nome": "Fernanda Lima",
+      "cargo": "Analista Financeiro",
+      "setor": "Financeiro",
+      "email": "fernanda.lima@grupocropfield.com.br",
+      "telefone": "(43) 3422-0004",
+      "ramal": "204",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1239291/pexels-photo-1239291.jpeg?w=150"
+    },
+    {
+      "id": "eq5",
+      "nome": "Rodrigo Alves",
+      "cargo": "Coordenador de Vendas",
+      "setor": "Vendas",
+      "email": "rodrigo.alves@grupocropfield.com.br",
+      "telefone": "(43) 3422-0005",
+      "ramal": "205",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1681010/pexels-photo-1681010.jpeg?w=150"
+    },
+    {
+      "id": "eq6",
+      "nome": "Beatriz Silva",
+      "cargo": "Assistente Administrativo",
+      "setor": "Administração",
+      "email": "beatriz.silva@grupocropfield.com.br",
+      "telefone": "(43) 3422-0006",
+      "ramal": "206",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1036627/pexels-photo-1036627.jpeg?w=150"
+    },
+    {
+      "id": "eq7",
+      "nome": "Thiago Pereira",
+      "cargo": "Analista de Marketing",
+      "setor": "Marketing",
+      "email": "thiago.pereira@grupocropfield.com.br",
+      "telefone": "(43) 3422-0007",
+      "ramal": "207",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1102341/pexels-photo-1102341.jpeg?w=150"
+    },
+    {
+      "id": "eq8",
+      "nome": "Carla Rodrigues",
+      "cargo": "Recepcionista",
+      "setor": "Recepção",
+      "email": "carla.rodrigues@grupocropfield.com.br",
+      "telefone": "(43) 3422-0008",
+      "ramal": "208",
+      "localizacao": "Apucarana - PR",
+      "foto": "https://images.pexels.com/photos/1183266/pexels-photo-1183266.jpeg?w=150"
+    }
+  ]
+}
