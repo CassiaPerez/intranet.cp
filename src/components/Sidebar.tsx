@@ -24,14 +24,18 @@ function SidebarImpl() {
     user.role === 'rh' || 
     user.role === 'ti' || 
     user.sector === 'TI' || 
-    user.sector === 'RH'
+    user.sector === 'RH' ||
+    (user as any).setor === 'TI' ||
+    (user as any).setor === 'RH'
   );
   
   // Verifica se é ESTRITAMENTE admin para o Painel Admin
   const isStrictAdmin = !!user && (
     user.role === 'admin' || 
     user.sector === 'TI' || 
-    user.sector === 'RH'
+    user.sector === 'RH' ||
+    (user as any).setor === 'TI' ||
+    (user as any).setor === 'RH'
   );
 
   return (

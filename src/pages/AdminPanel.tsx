@@ -34,7 +34,9 @@ export const AdminPanel: React.FC = () => {
   const hasAdminAccess = user && (
     user.role === 'admin' || 
     user.sector === 'TI' || 
-    user.sector === 'RH'
+    user.sector === 'RH' ||
+    (user as any).setor === 'TI' ||
+    (user as any).setor === 'RH'
   );
   
   if (!hasAdminAccess) {
