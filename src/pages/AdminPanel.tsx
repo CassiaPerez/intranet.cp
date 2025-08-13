@@ -229,22 +229,14 @@ const ITPanel: React.FC = () => {
 
   const loadRequests = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/ti/solicitacoes`, {
-        credentials: 'include'
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setRequests(data.solicitacoes || []);
-      } else {
-        // Fallback para dados mock
-        setRequests([
-          { id: 1, titulo: 'Notebook Dell', solicitante_nome: 'João Silva', status: 'pendente', created_at: '2025-01-15', descricao: 'Preciso de um notebook para trabalho remoto' },
-        ]);
-      }
+      // Mock data - replace with actual API call
+      setRequests([
+        { id: 1, titulo: 'Notebook Dell', user: 'João Silva', equipment: 'Notebook', priority: 'Alta', status: 'Pendente', date: '15/01/2025', descricao: 'Preciso de um notebook para trabalho remoto' },
+        { id: 2, titulo: 'Mouse sem fio', user: 'Maria Santos', equipment: 'Mouse', priority: 'Média', status: 'Aprovado', date: '14/01/2025', descricao: 'Mouse atual com defeito' },
+        { id: 3, titulo: 'Headset', user: 'Carlos Oliveira', equipment: 'Headset', priority: 'Baixa', status: 'Entregue', date: '13/01/2025', descricao: 'Para videoconferências' },
+      ]);
     } catch (error) {
       console.error('Erro ao carregar solicitações:', error);
-      setRequests([]);
     } finally {
       setLoading(false);
     }
@@ -252,10 +244,21 @@ const ITPanel: React.FC = () => {
 
   const updateRequestStatus = async (id: number, newStatus: string) => {
     try {
-      setRequests(prev => prev.map(req => 
-        req.id === id ? { ...req, status: newStatus } : req
-      ));
-      toast.success(`Solicitação ${newStatus.toLowerCase()}`);
+      const response = await fetch(`${API_BASE}/api/ti/solicitacoes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        setRequests(prev => prev.map(req => 
+          req.id === id ? { ...req, status: newStatus } : req
+        ));
+        toast.success(`Solicitação ${newStatus.toLowerCase()}`);
+      } else {
+        toast.error('Erro ao atualizar solicitação');
+      }
     } catch (error) {
       toast.error('Erro ao atualizar solicitação');
     }
