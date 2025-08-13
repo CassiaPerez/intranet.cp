@@ -264,10 +264,9 @@ async function createSchema() {
     console.log('Schema criado/verificado com sucesso');
   } catch (e) {
     console.error('Erro ao criar schema:', e);
+    throw e; // Re-throw to prevent server from starting with broken database
   }
 }
-
-createSchema();
 
 // -------------------------------------------------------------
 // Role-based middleware
@@ -576,12 +575,45 @@ async function ensureDefaultAdmin() {
     }
   } catch (error) {
     console.error('Error creating default admin:', error);
+    throw error; // Re-throw to prevent server from starting with broken admin setup
   }
 }
 
-// Call this after schema creation
-createSchema().then(() => {
-  ensureDefaultAdmin();
+// -------------------------------------------------------------
+// Server initialization
+// -------------------------------------------------------------
+async function initializeServer() {
+  try {
+    console.log('Initializing database schema...');
+    await createSchema();
+    
+    console.log('Setting up default admin user...');
+    await ensureDefaultAdmin();
+    
+    console.log('Database initialization complete!');
+    
+    // Start the server only after successful database initialization
+    app.listen(PORT, () => {
+      console.log(`Servidor rodando na porta ${PORT}`);
+      console.log(`Frontend URL: ${FRONTEND_URL}`);
+      console.log(`Google OAuth configurado: ${!!GOOGLE_CLIENT_ID}`);
+    });
+    
+  } catch (error) {
+    console.error('Failed to initialize server:', error);
+    process.exit(1); // Exit with error code if initialization fails
+  }
+}
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
 app.post('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
@@ -1231,10 +1263,6 @@ app.get('/api/trocas-proteina', authMiddleware, async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// Server startup
+// Start server initialization
 // -------------------------------------------------------------
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`Frontend URL: ${FRONTEND_URL}`);
-  console.log(`Google OAuth configurado: ${!!GOOGLE_CLIENT_ID}`);
-});
+initializeServer();
