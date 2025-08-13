@@ -14,7 +14,7 @@ import { Mural } from './pages/Mural';
 import { AdminPanel } from './pages/AdminPanel';
 import { TrocaProteinas } from './pages/TrocaProteinas';
 import './index.css';
-import { Painel } from './pages/Painel';
+import { Dashboard } from './pages/Dashboard';
 
 function App() {
   return (
@@ -100,7 +100,7 @@ function App() {
                 path="/painel"
                 element={
                   <ProtectedRoute>
-                    <Painel />
+                    <AdminPanel />
                   </ProtectedRoute>
                 }
               />
