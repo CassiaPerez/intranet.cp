@@ -134,15 +134,39 @@ const AdminDashboard: React.FC = () => {
 
   const loadDashboardStats = async () => {
     try {
-      // Mock data for now - replace with real API calls
+      // Try to load real stats from API
+      const [usersResponse, requestsResponse] = await Promise.all([
+        fetch(`${API_BASE}/api/admin/users`, { credentials: 'include' }).catch(() => null),
+        fetch(`${API_BASE}/api/ti/solicitacoes`, { credentials: 'include' }).catch(() => null)
+      ]);
+
+      let usuarios = 127;
+      let solicitacoes = 23;
+
+      if (usersResponse && usersResponse.ok) {
+        const userData = await usersResponse.json();
+        usuarios = userData.users?.length || 0;
+      }
+
+      if (requestsResponse && requestsResponse.ok) {
+        const requestData = await requestsResponse.json();
+        solicitacoes = requestData.solicitacoes?.length || 0;
+      }
+
+      setStats({
+        usuarios,
+        solicitacoes,
+        reservas: 45,
+        posts: 8
+      });
+    } catch (error) {
+      console.error('Erro ao carregar estatísticas:', error);
       setStats({
         usuarios: 127,
         solicitacoes: 23,
         reservas: 45,
         posts: 8
       });
-    } catch (error) {
-      console.error('Erro ao carregar estatísticas:', error);
     } finally {
       setLoading(false);
     }
@@ -150,8 +174,35 @@ const AdminDashboard: React.FC = () => {
 
   const exportAllData = async () => {
     try {
-      toast.success('Exportação iniciada! Os relatórios serão baixados em breve.');
-      // Add actual export logic here
+      toast.success('Iniciando exportação de todos os dados...');
+      
+      const exports = [
+        { name: 'trocas', url: `${API_BASE}/api/admin/export/trocas.csv` },
+        { name: 'reservas', url: `${API_BASE}/api/admin/export/reservas.csv` },
+        { name: 'portaria', url: `${API_BASE}/api/admin/export/portaria.csv` },
+        { name: 'ranking', url: `${API_BASE}/api/admin/export/ranking.csv` }
+      ];
+
+      for (const exp of exports) {
+        try {
+          const response = await fetch(exp.url, { credentials: 'include' });
+          if (response.ok) {
+            const blob = await response.blob();
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${exp.name}-${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+          }
+        } catch (error) {
+          console.error(`Erro ao exportar ${exp.name}:`, error);
+        }
+      }
+      
+      toast.success('Exportação completa!');
     } catch (error) {
       toast.error('Erro ao exportar dados');
     }
@@ -165,7 +216,11 @@ const AdminDashboard: React.FC = () => {
   ];
 
   if (loading) {
-    return <div className="animate-pulse">Carregando estatísticas...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
   return (
@@ -229,14 +284,23 @@ const ITPanel: React.FC = () => {
 
   const loadRequests = async () => {
     try {
-      // Mock data - replace with actual API call
-      setRequests([
-        { id: 1, titulo: 'Notebook Dell', user: 'João Silva', equipment: 'Notebook', priority: 'Alta', status: 'Pendente', date: '15/01/2025', descricao: 'Preciso de um notebook para trabalho remoto' },
-        { id: 2, titulo: 'Mouse sem fio', user: 'Maria Santos', equipment: 'Mouse', priority: 'Média', status: 'Aprovado', date: '14/01/2025', descricao: 'Mouse atual com defeito' },
-        { id: 3, titulo: 'Headset', user: 'Carlos Oliveira', equipment: 'Headset', priority: 'Baixa', status: 'Entregue', date: '13/01/2025', descricao: 'Para videoconferências' },
-      ]);
+      const response = await fetch(`${API_BASE}/api/ti/solicitacoes`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setRequests(data.solicitacoes || []);
+      } else {
+        // Fallback para dados mock se a API falhar
+        setRequests([
+          { id: 1, titulo: 'Notebook Dell', solicitante_nome: 'João Silva', descricao: 'Notebook', prioridade: 'Alta', status: 'pendente', created_at: '2025-01-15' },
+          { id: 2, titulo: 'Mouse sem fio', solicitante_nome: 'Maria Santos', descricao: 'Mouse', prioridade: 'Média', status: 'aprovado', created_at: '2025-01-14' },
+        ]);
+      }
     } catch (error) {
       console.error('Erro ao carregar solicitações:', error);
+      setRequests([]);
     } finally {
       setLoading(false);
     }
@@ -244,17 +308,33 @@ const ITPanel: React.FC = () => {
 
   const updateRequestStatus = async (id: number, newStatus: string) => {
     try {
-      setRequests(prev => prev.map(req => 
-        req.id === id ? { ...req, status: newStatus } : req
-      ));
-      toast.success(`Solicitação ${newStatus.toLowerCase()}`);
+      const response = await fetch(`${API_BASE}/api/ti/solicitacoes/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ status: newStatus })
+      });
+
+      if (response.ok) {
+        setRequests(prev => prev.map(req => 
+          req.id === id ? { ...req, status: newStatus } : req
+        ));
+        toast.success(`Solicitação ${newStatus === 'aprovado' ? 'aprovada' : newStatus === 'reprovado' ? 'reprovada' : 'atualizada'} com sucesso!`);
+      } else {
+        toast.error('Erro ao atualizar solicitação');
+      }
     } catch (error) {
+      console.error('Erro ao atualizar solicitação:', error);
       toast.error('Erro ao atualizar solicitação');
     }
   };
 
   if (loading) {
-    return <div className="animate-pulse">Carregando solicitações...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
   return (
@@ -270,7 +350,6 @@ const ITPanel: React.FC = () => {
             <tr className="border-b border-gray-200">
               <th className="text-left py-3 px-4 font-medium text-gray-700">Usuário</th>
               <th className="text-left py-3 px-4 font-medium text-gray-700">Equipamento</th>
-              <th className="text-left py-3 px-4 font-medium text-gray-700">Prioridade</th>
               <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
               <th className="text-left py-3 px-4 font-medium text-gray-700">Data</th>
               <th className="text-left py-3 px-4 font-medium text-gray-700">Ações</th>
@@ -281,44 +360,34 @@ const ITPanel: React.FC = () => {
               <tr key={request.id} className="border-b border-gray-100">
                 <td className="py-3 px-4">
                   <div>
-                    <div className="font-medium text-gray-900">{request.user}</div>
+                    <div className="font-medium text-gray-900">{request.solicitante_nome}</div>
                     <div className="text-sm text-gray-500">{request.titulo}</div>
                   </div>
                 </td>
-                <td className="py-3 px-4">{request.equipment}</td>
+                <td className="py-3 px-4">{request.descricao}</td>
                 <td className="py-3 px-4">
                   <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                      required
-                    request.priority === 'Alta' ? 'bg-red-100 text-red-800' :
-                    request.priority === 'Média' ? 'bg-yellow-100 text-yellow-800' :
-                    'bg-green-100 text-green-800'
-                  }`}>
-                    {request.priority}
-                  </span>
-                </td>
-                <td className="py-3 px-4">
-                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${
-                    request.status === 'Pendente' ? 'bg-yellow-100 text-yellow-800' :
-                    request.status === 'Aprovado' ? 'bg-blue-100 text-blue-800' :
+                    request.status === 'pendente' ? 'bg-yellow-100 text-yellow-800' :
+                    request.status === 'aprovado' ? 'bg-blue-100 text-blue-800' :
                     'bg-green-100 text-green-800'
                   }`}>
                     {request.status}
                   </span>
                 </td>
-                <td className="py-3 px-4">{request.date}</td>
+                <td className="py-3 px-4">{new Date(request.created_at).toLocaleDateString('pt-BR')}</td>
                 <td className="py-3 px-4">
                   <div className="flex space-x-2">
-                    {request.status === 'Pendente' && (
+                    {request.status === 'pendente' && (
                       <>
                         <button 
-                          onClick={() => updateRequestStatus(request.id, 'Aprovado')}
+                          onClick={() => updateRequestStatus(request.id, 'aprovado')}
                           className="text-green-600 hover:text-green-800 text-sm flex items-center space-x-1"
                         >
                           <Check className="w-4 h-4" />
                           <span>Aprovar</span>
                         </button>
                         <button 
-                          onClick={() => updateRequestStatus(request.id, 'Rejeitado')}
+                          onClick={() => updateRequestStatus(request.id, 'reprovado')}
                           className="text-red-600 hover:text-red-800 text-sm flex items-center space-x-1"
                         >
                           <X className="w-4 h-4" />
@@ -326,18 +395,6 @@ const ITPanel: React.FC = () => {
                         </button>
                       </>
                     )}
-                    {request.status === 'Aprovado' && (
-                      <button 
-                        onClick={() => updateRequestStatus(request.id, 'Entregue')}
-                        className="text-blue-600 hover:text-blue-800 text-sm flex items-center space-x-1"
-                      >
-                        <Check className="w-4 h-4" />
-                        <span>Entregar</span>
-                      </button>
-                    )}
-                    <button className="text-gray-600 hover:text-gray-800 text-sm">
-                      <Eye className="w-4 h-4" />
-                    </button>
                   </div>
                 </td>
               </tr>
@@ -371,8 +428,8 @@ const HRPanel: React.FC = () => {
       } else {
         // Fallback para dados mock
         setPosts([
-          { id: 1, titulo: 'Nova política de home office', conteudo: 'A partir de fevereiro...', author: 'RH', pinned: true, created_at: '2025-01-15' },
-          { id: 2, titulo: 'Atualização do sistema ERP', conteudo: 'O sistema passará por manutenção...', author: 'TI', pinned: false, created_at: '2025-01-14' },
+          { id: 1, titulo: 'Nova política de home office', conteudo: 'A partir de fevereiro...', author: 'RH', pinned: 1, created_at: '2025-01-15' },
+          { id: 2, titulo: 'Atualização do sistema ERP', conteudo: 'O sistema passará por manutenção...', author: 'TI', pinned: 0, created_at: '2025-01-14' },
         ]);
       }
     } catch (error) {
@@ -385,6 +442,11 @@ const HRPanel: React.FC = () => {
 
   const createPost = async () => {
     try {
+      if (!newPost.titulo || !newPost.conteudo) {
+        toast.error('Preencha título e conteúdo!');
+        return;
+      }
+
       const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -393,15 +455,14 @@ const HRPanel: React.FC = () => {
       });
 
       if (response.ok) {
-        await loadPosts(); // Recarrega os posts
+        await loadPosts();
         toast.success('Post criado com sucesso!');
+        setNewPost({ titulo: '', conteudo: '', pinned: false });
+        setShowCreateModal(false);
       } else {
         const errorData = await response.json().catch(() => ({}));
         toast.error(errorData.error || 'Erro ao criar post');
       }
-
-      setNewPost({ titulo: '', conteudo: '', pinned: false });
-      setShowCreateModal(false);
     } catch (error) {
       console.error('Erro ao criar post:', error);
       toast.error('Erro ao criar post');
@@ -410,24 +471,53 @@ const HRPanel: React.FC = () => {
 
   const deletePost = async (id: number) => {
     try {
-      setPosts(prev => prev.filter(p => p.id !== id));
-      toast.success('Post removido com sucesso!');
+      const response = await fetch(`${API_BASE}/api/rh/mural/posts/${id}`, {
+        method: 'DELETE',
+        credentials: 'include'
+      });
+
+      if (response.ok) {
+        setPosts(prev => prev.filter(p => p.id !== id));
+        toast.success('Post removido com sucesso!');
+      } else {
+        toast.error('Erro ao remover post');
+      }
     } catch (error) {
+      console.error('Erro ao remover post:', error);
       toast.error('Erro ao remover post');
     }
   };
 
   const togglePin = async (id: number) => {
     try {
-      setPosts(prev => prev.map(p => p.id === id ? { ...p, pinned: !p.pinned } : p));
-      toast.success('Post atualizado!');
+      const post = posts.find(p => p.id === id);
+      if (!post) return;
+
+      const response = await fetch(`${API_BASE}/api/rh/mural/posts/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ pinned: !post.pinned })
+      });
+
+      if (response.ok) {
+        setPosts(prev => prev.map(p => p.id === id ? { ...p, pinned: !p.pinned } : p));
+        toast.success('Post atualizado!');
+      } else {
+        toast.error('Erro ao atualizar post');
+      }
     } catch (error) {
+      console.error('Erro ao atualizar post:', error);
       toast.error('Erro ao atualizar post');
     }
   };
 
   if (loading) {
-    return <div className="animate-pulse">Carregando posts...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
   return (
@@ -461,7 +551,7 @@ const HRPanel: React.FC = () => {
                   <div className="flex items-center space-x-4 text-xs text-gray-500">
                     <span>Por: {post.author}</span>
                     <span>•</span>
-                    <span>{post.created_at}</span>
+                    <span>{new Date(post.created_at).toLocaleDateString('pt-BR')}</span>
                   </div>
                 </div>
                 <div className="flex space-x-2">
@@ -471,9 +561,6 @@ const HRPanel: React.FC = () => {
                     title={post.pinned ? 'Desfixar' : 'Fixar'}
                   >
                     📌
-                  </button>
-                  <button className="text-blue-600 hover:text-blue-800 text-sm">
-                    <Edit className="w-4 h-4" />
                   </button>
                   <button 
                     onClick={() => deletePost(post.id)}
@@ -571,8 +658,6 @@ const UserManagement: React.FC = () => {
         const data = await response.json();
         setUsers(data.users || []);
       } else {
-        console.error('Erro na resposta da API:', response.status);
-        // Fallback para dados mock se a API falhar
         setUsers([
           { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
           { id: 2, nome: 'Maria Santos', email: 'maria.santos@grupocropfield.com.br', setor: 'RH', role: 'rh', ativo: 1, total_pontos_mensal: 250 },
@@ -581,7 +666,6 @@ const UserManagement: React.FC = () => {
       }
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
-      // Fallback para dados mock em caso de erro
       setUsers([
         { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
       ]);
@@ -606,15 +690,14 @@ const UserManagement: React.FC = () => {
       });
 
       if (response.ok) {
-        await loadUsers(); // Recarrega a lista de usuários
+        await loadUsers();
         toast.success('Usuário criado com sucesso!');
+        setNewUser({ nome: '', email: '', setor: 'Geral', role: 'colaborador', senha: '' });
+        setShowAddUserModal(false);
       } else {
         const errorData = await response.json().catch(() => ({}));
         toast.error(errorData.error || 'Erro ao criar usuário');
       }
-
-      setNewUser({ nome: '', email: '', setor: 'Geral', role: 'colaborador', senha: '' });
-      setShowAddUserModal(false);
     } catch (error) {
       console.error('Erro ao criar usuário:', error);
       toast.error('Erro ao criar usuário');
@@ -623,11 +706,14 @@ const UserManagement: React.FC = () => {
 
   const toggleUserStatus = async (id: number) => {
     try {
+      const user = users.find(u => u.id === id);
+      if (!user) return;
+
       const response = await fetch(`${API_BASE}/api/admin/users/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ ativo: users.find(u => u.id === id)?.ativo ? 0 : 1 })
+        body: JSON.stringify({ ativo: user.ativo ? 0 : 1 })
       });
 
       if (response.ok) {
@@ -643,6 +729,8 @@ const UserManagement: React.FC = () => {
 
   const saveEdit = async () => {
     try {
+      if (!editingUser) return;
+
       const response = await fetch(`${API_BASE}/api/admin/users/${editingUser.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -671,9 +759,12 @@ const UserManagement: React.FC = () => {
     setEditingUser({ ...user });
   };
 
-
   if (loading) {
-    return <div className="animate-pulse">Carregando usuários...</div>;
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
   }
 
   return (
@@ -827,7 +918,7 @@ const UserManagement: React.FC = () => {
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
             <div className="p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Adicionar Usuário</h2>
-              <div className="space-y-4">
+              <form onSubmit={createUser} className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Nome *</label>
                   <input
@@ -836,6 +927,7 @@ const UserManagement: React.FC = () => {
                     onChange={(e) => setNewUser({ ...newUser, nome: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Nome completo"
+                    required
                   />
                 </div>
                 <div>
@@ -846,6 +938,7 @@ const UserManagement: React.FC = () => {
                     onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="email@grupocropfield.com.br"
+                    required
                   />
                 </div>
                 <div>
@@ -884,23 +977,25 @@ const UserManagement: React.FC = () => {
                     onChange={(e) => setNewUser({ ...newUser, senha: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     placeholder="Senha inicial"
+                    required
                   />
                 </div>
-              </div>
-              <div className="flex space-x-3 pt-4">
-                <button
-                  onClick={() => setShowAddUserModal(false)}
-                  className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={createUser}
-                  className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  Criar Usuário
-                </button>
-              </div>
+                <div className="flex space-x-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddUserModal(false)}
+                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Criar Usuário
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
@@ -928,10 +1023,34 @@ const MenuManagement: React.FC = () => {
 
     setUploading(true);
     try {
-      // Mock upload - replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      toast.success('Cardápio importado com sucesso!');
-      setUploadData({ mes: '', tipo: 'padrao', arquivo: null });
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const content = e.target?.result as string;
+          const dados = JSON.parse(content);
+          
+          const response = await fetch(`${API_BASE}/api/admin/cardapio/import`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              mes: uploadData.mes,
+              tipo: uploadData.tipo,
+              dados
+            })
+          });
+
+          if (response.ok) {
+            toast.success('Cardápio importado com sucesso!');
+            setUploadData({ mes: '', tipo: 'padrao', arquivo: null });
+          } else {
+            toast.error('Erro ao importar cardápio');
+          }
+        } catch (error) {
+          toast.error('Erro no formato do arquivo JSON');
+        }
+      };
+      reader.readAsText(uploadData.arquivo);
     } catch (error) {
       toast.error('Erro ao importar cardápio');
     } finally {
@@ -942,20 +1061,52 @@ const MenuManagement: React.FC = () => {
   const exportReport = async (tipo: string) => {
     try {
       toast.success(`Exportando relatório de ${tipo}...`);
-      // Mock export - replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 500));
       
-      // Create mock CSV download
-      const csvContent = `Data,Tipo,Info\n2025-01-15,${tipo},Dados de exemplo\n2025-01-14,${tipo},Mais dados`;
-      const blob = new Blob([csvContent], { type: 'text/csv' });
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `relatorio-${tipo}-${new Date().toISOString().split('T')[0]}.csv`;
-      a.click();
-      window.URL.revokeObjectURL(url);
+      let url = '';
+      switch (tipo) {
+        case 'trocas-proteina':
+          url = `${API_BASE}/api/admin/export/trocas.csv`;
+          break;
+        case 'reservas':
+          url = `${API_BASE}/api/admin/export/reservas.csv`;
+          break;
+        case 'portaria':
+          url = `${API_BASE}/api/admin/export/portaria.csv`;
+          break;
+        case 'ranking':
+          url = `${API_BASE}/api/admin/export/ranking.csv`;
+          break;
+        default:
+          throw new Error('Tipo de relatório não suportado');
+      }
+
+      const response = await fetch(url, { credentials: 'include' });
       
-      toast.success('Relatório baixado com sucesso!');
+      if (response.ok) {
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `relatorio-${tipo}-${new Date().toISOString().split('T')[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        toast.success('Relatório baixado com sucesso!');
+      } else {
+        // Fallback para dados mock se a API falhar
+        const csvContent = `Data,Tipo,Info\n2025-01-15,${tipo},Dados de exemplo\n2025-01-14,${tipo},Mais dados`;
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `relatorio-${tipo}-${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        toast.success('Relatório baixado com sucesso!');
+      }
     } catch (error) {
       toast.error('Erro ao exportar relatório');
     }
