@@ -12,14 +12,24 @@ const NAV: NavItem[] = [
   { to: '/diretorio', label: 'Diretório' },
   { to: '/equipamentos', label: 'Equipamentos', adminOnly: true },
   { to: '/mural', label: 'Mural' },
-  { to: '/painel', label: 'Painel Admin', adminOnly: true },
+  { to: '/usuarios', label: 'Usuários', adminOnly: true },
+  { to: '/painel', label: 'Painel Admin' }, // Removido adminOnly porque vamos tratar especificamente
 ];
 
 function SidebarImpl() {
   const { user, logout } = useAuth();
-  const isAdmin = !!user && (user.sector === 'TI' || user.sector === 'RH' || user.role === 'admin' || user.role === 'rh' || user.role === 'ti');
-  const isAdminOrRH = !!user && (user.role === 'admin' || user.role === 'rh' || user.sector === 'RH');
-  const isOnlyAdmin = !!user && (user.role === 'admin');
+  
+  // Verifica se é admin/rh/ti para itens com adminOnly
+  const canAccessAdminItems = !!user && (
+    user.role === 'admin' || 
+    user.role === 'rh' || 
+    user.role === 'ti' || 
+    user.sector === 'TI' || 
+    user.sector === 'RH'
+  );
+  
+  // Verifica se é APENAS admin para o Painel Admin
+  const isOnlyAdmin = !!user && user.role === 'admin';
 
   return (
     <aside className="w-64 min-h-screen border-r bg-white p-4">
@@ -29,8 +39,16 @@ function SidebarImpl() {
       </div>
       <nav className="flex flex-col gap-1">
         {NAV.filter(item => {
-          if (item.to === '/painel') return isOnlyAdmin;
-          return !item.adminOnly || isAdmin;
+          // Painel Admin: APENAS para role === 'admin'
+          if (item.to === '/painel') {
+            return isOnlyAdmin;
+          }
+          // Outros itens adminOnly: para admin/rh/ti
+          if (item.adminOnly) {
+            return canAccessAdminItems;
+          }
+          // Itens normais: para todos
+          return true;
         }).map(item => (
           <NavLink
             key={item.to}
