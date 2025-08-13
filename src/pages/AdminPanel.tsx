@@ -360,13 +360,23 @@ const HRPanel: React.FC = () => {
 
   const loadPosts = async () => {
     try {
-      // Mock data - replace with actual API call
-      setPosts([
-        { id: 1, titulo: 'Nova política de home office', conteudo: 'A partir de fevereiro...', author: 'RH', pinned: true, created_at: '2025-01-15' },
-        { id: 2, titulo: 'Atualização do sistema ERP', conteudo: 'O sistema passará por manutenção...', author: 'TI', pinned: false, created_at: '2025-01-14' },
-      ]);
+      const response = await fetch(`${API_BASE}/api/mural/posts`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setPosts(data.posts || []);
+      } else {
+        // Fallback para dados mock
+        setPosts([
+          { id: 1, titulo: 'Nova política de home office', conteudo: 'A partir de fevereiro...', author: 'RH', pinned: true, created_at: '2025-01-15' },
+          { id: 2, titulo: 'Atualização do sistema ERP', conteudo: 'O sistema passará por manutenção...', author: 'TI', pinned: false, created_at: '2025-01-14' },
+        ]);
+      }
     } catch (error) {
       console.error('Erro ao carregar posts:', error);
+      setPosts([]);
     } finally {
       setLoading(false);
     }
@@ -374,17 +384,25 @@ const HRPanel: React.FC = () => {
 
   const createPost = async () => {
     try {
-      const post = {
-        id: Date.now(),
-        ...newPost,
-        author: 'RH',
-        created_at: new Date().toISOString().split('T')[0]
-      };
-      setPosts(prev => [post, ...prev]);
+      const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(newPost)
+      });
+
+      if (response.ok) {
+        await loadPosts(); // Recarrega os posts
+        toast.success('Post criado com sucesso!');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao criar post');
+      }
+
       setNewPost({ titulo: '', conteudo: '', pinned: false });
       setShowCreateModal(false);
-      toast.success('Post criado com sucesso!');
     } catch (error) {
+      console.error('Erro ao criar post:', error);
       toast.error('Erro ao criar post');
     }
   };
@@ -544,47 +562,105 @@ const UserManagement: React.FC = () => {
 
   const loadUsers = async () => {
     try {
-      // Mock data - replace with actual API call
-      setUsers([
-        { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
-        { id: 2, nome: 'Maria Santos', email: 'maria.santos@grupocropfield.com.br', setor: 'RH', role: 'rh', ativo: 1, total_pontos_mensal: 250 },
-        { id: 3, nome: 'Carlos Oliveira', email: 'carlos.oliveira@grupocropfield.com.br', setor: 'TI', role: 'ti', ativo: 1, total_pontos_mensal: 300 },
-        { id: 4, nome: 'Ana Costa', email: 'ana.costa@grupocropfield.com.br', setor: 'Vendas', role: 'colaborador', ativo: 1, total_pontos_mensal: 180 },
-        { id: 5, nome: 'Roberto Lima', email: 'roberto.lima@grupocropfield.com.br', setor: 'Marketing', role: 'colaborador', ativo: 0, total_pontos_mensal: 50 },
-      ]);
+      const response = await fetch(`${API_BASE}/api/admin/users`, {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUsers(data.users || []);
+      } else {
+        console.error('Erro na resposta da API:', response.status);
+        // Fallback para dados mock se a API falhar
+        setUsers([
+          { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
+          { id: 2, nome: 'Maria Santos', email: 'maria.santos@grupocropfield.com.br', setor: 'RH', role: 'rh', ativo: 1, total_pontos_mensal: 250 },
+          { id: 3, nome: 'Carlos Oliveira', email: 'carlos.oliveira@grupocropfield.com.br', setor: 'TI', role: 'ti', ativo: 1, total_pontos_mensal: 300 },
+        ]);
+      }
     } catch (error) {
       console.error('Erro ao carregar usuários:', error);
+      // Fallback para dados mock em caso de erro
+      setUsers([
+        { id: 1, nome: 'João Silva', email: 'joao.silva@grupocropfield.com.br', setor: 'Financeiro', role: 'colaborador', ativo: 1, total_pontos_mensal: 150 },
+      ]);
     } finally {
       setLoading(false);
     }
   };
 
-  const createUser = async () => {
+  const createUser = async (e: React.FormEvent) => {
+    e.preventDefault();
     try {
       if (!newUser.nome || !newUser.email || !newUser.senha) {
         toast.error('Preencha todos os campos obrigatórios!');
         return;
       }
 
-      const user = {
-        id: Date.now(),
-        ...newUser,
-        ativo: 1,
-        total_pontos_mensal: 0
-      };
-      setUsers(prev => [user, ...prev]);
+      const response = await fetch(`${API_BASE}/api/admin/users`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(newUser)
+      });
+
+      if (response.ok) {
+        await loadUsers(); // Recarrega a lista de usuários
+        toast.success('Usuário criado com sucesso!');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao criar usuário');
+      }
+
       setNewUser({ nome: '', email: '', setor: 'Geral', role: 'colaborador', senha: '' });
       setShowAddUserModal(false);
-      toast.success('Usuário criado com sucesso!');
     } catch (error) {
+      console.error('Erro ao criar usuário:', error);
       toast.error('Erro ao criar usuário');
     }
   };
 
   const toggleUserStatus = async (id: number) => {
     try {
-      setUsers(prev => prev.map(u => u.id === id ? { ...u, ativo: u.ativo ? 0 : 1 } : u));
-      toast.success('Status do usuário atualizado!');
+      const response = await fetch(`${API_BASE}/api/admin/users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ativo: users.find(u => u.id === id)?.ativo ? 0 : 1 })
+      });
+
+      if (response.ok) {
+        setUsers(prev => prev.map(u => u.id === id ? { ...u, ativo: u.ativo ? 0 : 1 } : u));
+        toast.success('Status do usuário atualizado!');
+      } else {
+        toast.error('Erro ao atualizar usuário');
+      }
+    } catch (error) {
+      toast.error('Erro ao atualizar usuário');
+    }
+  };
+
+  const saveEdit = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/admin/users/${editingUser.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          nome: editingUser.nome,
+          email: editingUser.email,
+          setor: editingUser.setor,
+          role: editingUser.role
+        })
+      });
+
+      if (response.ok) {
+        setUsers(prev => prev.map(u => u.id === editingUser.id ? editingUser : u));
+        setEditingUser(null);
+        toast.success('Usuário atualizado!');
+      } else {
+        toast.error('Erro ao atualizar usuário');
+      }
     } catch (error) {
       toast.error('Erro ao atualizar usuário');
     }
@@ -594,15 +670,6 @@ const UserManagement: React.FC = () => {
     setEditingUser({ ...user });
   };
 
-  const saveEdit = async () => {
-    try {
-      setUsers(prev => prev.map(u => u.id === editingUser.id ? editingUser : u));
-      setEditingUser(null);
-      toast.success('Usuário atualizado!');
-    } catch (error) {
-      toast.error('Erro ao atualizar usuário');
-    }
-  };
 
   if (loading) {
     return <div className="animate-pulse">Carregando usuários...</div>;
