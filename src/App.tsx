@@ -14,7 +14,6 @@ import { Mural } from './pages/Mural';
 import { AdminPanel } from './pages/AdminPanel';
 import { TrocaProteinas } from './pages/TrocaProteinas';
 import './index.css';
-import { Dashboard } from './pages/Dashboard';
 
 function App() {
   return (
