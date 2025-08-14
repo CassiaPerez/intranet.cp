@@ -5,15 +5,15 @@ type Contato = {
   id?: string | number;
   nome: string;
   cargo?: string;
-  setor?: string;   // apenas setores reais (Comercial, Financeiro, etc.)
+  setor?: string;   // somente setores reais (Comercial, Financeiro, etc.)
   cidade?: string;  // ex.: "Apucarana - PR"
   ramal?: string | number | null;
   telefone?: string;
   email?: string;
 };
 
-// Usa o base path do Vite (funciona em dev e em produção mesmo em subpasta)
-const JSON_PATH = `${import.meta.env.BASE_URL}diretorio/diretorio.json`;
+// Agora lê de public/dados/contatos.json
+const JSON_PATH = `${import.meta.env.BASE_URL}dados/contatos.json`;
 
 const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -22,38 +22,43 @@ const Diretorio: React.FC = () => {
 
   // filtros
   const [q, setQ] = useState('');
-  const [setor, setSetor] = useState<string>('');   // apenas setores reais
-  const [cidade, setCidade] = useState<string>(''); // cidade/UF
+  const [setor, setSetor] = useState<string>('');   // filtro de setor (sem cidades)
+  const [cidade, setCidade] = useState<string>(''); // filtro de cidade
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const url = `${JSON_PATH}?v=${Date.now()}`;
-        const res = await fetch(url, { cache: 'no-store' });
-
+        const res = await fetch(url, { cache: 'no-store' as RequestCache });
         const bodyText = await res.text().catch(() => '');
+
         if (!res.ok) {
           console.error('[Diretório] HTTP', res.status, res.statusText, 'URL:', url, 'Body:', bodyText.slice(0, 400));
           throw new Error(`HTTP ${res.status}`);
         }
 
-        // Se content-type não indica JSON e o conteúdo começa com "<", é HTML (fallback da SPA)
+        // Proteção: se veio HTML (fallback SPA), alerta claro
         const ct = res.headers.get('content-type') || '';
         if (!/application\/json|text\/json/i.test(ct) && bodyText.trim().startsWith('<')) {
-          console.error('[Diretório] Recebi HTML no lugar de JSON. Verifique se public/diretorio/diretorio.json existe. URL:', url);
+          console.error('[Diretório] Recebi HTML no lugar de JSON. Verifique se public/dados/contatos.json existe. URL:', url);
           throw new Error('Resposta não é JSON (provável fallback de SPA).');
         }
 
         const clean = bodyText.replace(/^\uFEFF/, ''); // remove BOM se houver
         const data = JSON.parse(clean);
 
-        // Aceita objeto com múltiplos arrays (representantes, equipe_apucarana_pr, etc.)
+        // Aceita: array direto OU objeto com vários arrays (representantes, equipe_*, etc.)
         const lista: any[] = Array.isArray(data)
           ? data
           : Object.values(data).reduce((acc: any[], v: any) => (Array.isArray(v) ? acc.concat(v) : acc), []);
 
-        if (alive) setContatos(normalize(lista));
+        const normalizados = normalize(lista);
+
+        if (alive) {
+          setContatos(normalizados);
+          setErro('');
+        }
       } catch (e) {
         console.error('Falha ao carregar diretório:', e);
         if (alive) {
@@ -67,7 +72,7 @@ const Diretorio: React.FC = () => {
     return () => { alive = false; };
   }, []);
 
-  // SETORES (só valores que NÃO parecem cidade/UF)
+  // SETORES: só valores que NÃO parecem cidade/UF
   const setores = useMemo(() => {
     const s = new Set<string>();
     contatos.forEach(c => {
@@ -80,11 +85,14 @@ const Diretorio: React.FC = () => {
   // CIDADES
   const cidades = useMemo(() => {
     const s = new Set<string>();
-    contatos.forEach(c => c.cidade && s.add(c.cidade));
+    contatos.forEach(c => {
+      const v = (c.cidade || '').trim();
+      if (v) s.add(v);
+    });
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [contatos]);
 
-  // FILTRO
+  // FILTRO FINAL
   const filtrados = useMemo(() => {
     const term = q.trim().toLowerCase();
     return contatos.filter(c => {
@@ -93,16 +101,24 @@ const Diretorio: React.FC = () => {
         [c.nome, c.cargo, c.setor, c.cidade, c.telefone, c.email]
           .filter(Boolean)
           .some(v => String(v).toLowerCase().includes(term));
+
       const matchSetor = !setor || (c.setor || '') === setor;
       const matchCidade = !cidade || (c.cidade || '') === cidade;
+
       return matchTexto && matchSetor && matchCidade;
     });
   }, [contatos, q, setor, cidade]);
 
+  // UI
   return (
     <Layout>
       <div className="space-y-6">
-        <h1 className="text-2xl font-bold">Diretório</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Diretório</h1>
+          <div className="text-sm text-gray-500">
+            {loading ? 'Carregando…' : `${filtrados.length} contato(s)`}
+          </div>
+        </div>
 
         {/* Filtros */}
         <div className="flex flex-wrap gap-3 items-center">
@@ -112,6 +128,7 @@ const Diretorio: React.FC = () => {
             placeholder="Buscar por nome, cargo, setor, cidade, e-mail…"
             className="border rounded-lg px-3 py-2 flex-1 min-w-[220px]"
           />
+
           <select
             value={setor}
             onChange={e => setSetor(e.target.value)}
@@ -121,6 +138,7 @@ const Diretorio: React.FC = () => {
             <option value="">Todos os setores</option>
             {setores.map(s => (<option key={s} value={s}>{s}</option>))}
           </select>
+
           <select
             value={cidade}
             onChange={e => setCidade(e.target.value)}
@@ -130,6 +148,7 @@ const Diretorio: React.FC = () => {
             <option value="">Todas as cidades</option>
             {cidades.map(c => (<option key={c} value={c}>{c}</option>))}
           </select>
+
           {(setor || cidade || q) && (
             <button
               onClick={() => { setSetor(''); setCidade(''); setQ(''); }}
@@ -175,14 +194,15 @@ const Diretorio: React.FC = () => {
 export default Diretorio;
 export { Diretorio };
 
-/* ===================== helpers ===================== */
+/* ===================== Helpers ===================== */
 
+// Normaliza registros heterogêneos do JSON (representantes, equipes, etc.)
 function normalize(lista: any[]): Contato[] {
   return lista.map((r: any, i: number) => {
     const rawSetor  = r.setor ?? r.sector ?? r.departamento ?? '';
     const cidadeRaw = r.cidade ?? r.city ?? r.localizacao ?? '';
 
-    // Se "setor" parece cidade/UF, move para cidade e zera setor
+    // Se "setor" parece cidade/UF, move para cidade e limpa setor
     const setorFinal  = isLocationLike(rawSetor) ? '' : String(rawSetor || '');
     const cidadeFinal = cidadeRaw ? String(cidadeRaw) : (isLocationLike(rawSetor) ? String(rawSetor) : '');
 
