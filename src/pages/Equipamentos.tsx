@@ -26,28 +26,36 @@ export const Equipamentos: React.FC = () => {
     priority: 'medium' as 'low' | 'medium' | 'high',
   });
   const [loading, setLoading] = useState(false);
-  const [requests, setRequests] = useState<EquipmentRequest[]>([
-    {
-      id: '1',
-      equipment: 'Notebook',
-      justification: 'Para trabalho remoto',
-      priority: 'high',
-      status: 'approved',
-      requestDate: new Date('2025-01-10'),
-      user: 'João Silva',
-      userEmail: 'joao.silva@grupocropfield.com.br',
-    },
-    {
-      id: '2',
-      equipment: 'Mouse sem fio',
-      justification: 'Mouse atual com defeito',
-      priority: 'medium',
-      status: 'pending',
-      requestDate: new Date('2025-01-12'),
-      user: 'Maria Santos',
-      userEmail: 'maria.santos@grupocropfield.com.br',
-    },
-  ]);
+  const [requests, setRequests] = useState<EquipmentRequest[]>([]);
+
+  useEffect(() => {
+    loadRequests();
+  }, []);
+
+  const loadRequests = async () => {
+    try {
+      const response = await fetch('/api/ti/minhas', {
+        credentials: 'include'
+      });
+      if (response.ok) {
+        const data = await response.json();
+        // Transform backend data to frontend format
+        const transformedRequests = (data.solicitacoes || []).map((req: any) => ({
+          id: req.id.toString(),
+          equipment: req.titulo,
+          justification: req.descricao || '',
+          priority: 'medium' as const,
+          status: req.status === 'pendente' ? 'pending' : req.status === 'aprovado' ? 'approved' : 'delivered',
+          requestDate: new Date(req.created_at),
+          user: user?.name || 'Usuário',
+          userEmail: user?.email || '',
+        }));
+        setRequests(transformedRequests);
+      }
+    } catch (error) {
+      console.error('Erro ao carregar solicitações:', error);
+    }
+  };
 
   const equipmentTypes = [
     { id: 'notebook', name: 'Notebook', icon: Monitor },
@@ -96,38 +104,44 @@ export const Equipamentos: React.FC = () => {
         return;
       }
 
-      const newRequest: EquipmentRequest = {
-        id: Date.now().toString(),
-        equipment: equipmentName,
-        justification: formData.justification,
-        priority: formData.priority,
-        status: 'pending',
-        requestDate: new Date(),
-        user: (user as any)?.name || (user as any)?.nome || 'Usuário',
-        userEmail: (user as any)?.email || '',
-      };
-
-      setRequests(prev => [newRequest, ...prev]);
-
-      // Simular envio de email para TI
-      
-      // Add gamification activity
-      addActivity('equipment_request', `Solicitou equipamento: ${equipmentName}`, {
-        equipment: equipmentName,
-        priority: formData.priority,
-        justification: formData.justification,
+      // Send to backend API
+      const response = await fetch('/api/ti/solicitacoes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({
+          titulo: equipmentName,
+          descricao: `Prioridade: ${formData.priority}\nJustificativa: ${formData.justification}`,
+        }),
       });
-      
-      toast.success('Solicitação enviada com sucesso! O setor de TI foi notificado por email.');
 
-      // Reset form
-      setFormData({
-        equipment: '',
-        customEquipment: '',
-        justification: '',
-        priority: 'medium',
-      });
+      if (response.ok) {
+        await loadRequests(); // Reload requests
+        
+        // Add gamification activity
+        addActivity('equipment_request', `Solicitou equipamento: ${equipmentName}`, {
+          equipment: equipmentName,
+          priority: formData.priority,
+          justification: formData.justification,
+        });
+      
+        toast.success('Solicitação enviada com sucesso! O setor de TI foi notificado.');
+
+        // Reset form
+        setFormData({
+          equipment: '',
+          customEquipment: '',
+          justification: '',
+          priority: 'medium',
+        });
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao enviar solicitação');
+      }
     } catch (error) {
+      console.error('Erro ao enviar solicitação:', error);
       toast.error('Erro ao enviar solicitação!');
     } finally {
       setLoading(false);

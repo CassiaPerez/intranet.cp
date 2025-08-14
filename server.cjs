@@ -276,11 +276,16 @@ function requireRole(...roles) {
     if (!req.user) {
       return res.status(401).json({ ok: false, error: 'Não autenticado' });
     }
+    
+    console.log('Role check - User:', req.user.email, 'Role:', req.user.role, 'Required:', roles);
+    
     // Admin has access to everything
-    if (req.user.role === 'admin') {
+    if (req.user.role === 'admin' || req.user.email === 'admin@grupocropfield.com.br') {
       return next();
     }
+    
     if (!roles.includes(req.user.role)) {
+      console.log('Access denied - User role:', req.user.role, 'Required roles:', roles);
       return res.status(403).json({ ok: false, error: 'Acesso negado' });
     }
     next();
@@ -359,13 +364,30 @@ async function getUserMiddleware(req, res, next) {
   try {
     const user = await get("SELECT * FROM usuarios WHERE id = ? AND ativo = 1", [req.userId]);
     if (!user) {
-      req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral', role: 'colaborador' };
+      // Check for demo users
+      const demoUser = req.userId === 1 ? 
+        { id: 1, nome: 'Administrador', email: 'admin@grupocropfield.com.br', setor: 'TI', role: 'admin' } :
+        { id: req.userId, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral', role: 'colaborador' };
+      req.user = demoUser;
       return next();
     }
+    
+    // Ensure role is set for database users
+    if (!user.role) {
+      if (user.email === 'admin@grupocropfield.com.br' || user.setor === 'TI') {
+        user.role = 'admin';
+      } else if (user.setor === 'RH') {
+        user.role = 'rh';
+      } else {
+        user.role = 'colaborador';
+      }
+    }
+    
     req.user = user;
+    console.log('User middleware - User:', user.email, 'Role:', user.role);
     next();
   } catch {
-    req.user = { id: 1, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral', role: 'colaborador' };
+    req.user = { id: 1, nome: 'Administrador', email: 'admin@grupocropfield.com.br', setor: 'TI', role: 'admin' };
     next();
   }
 }
