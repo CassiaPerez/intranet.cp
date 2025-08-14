@@ -25,9 +25,10 @@ const Diretorio: React.FC = () => {
   const [cidade, setCidade] = useState<string>(''); // cidade/UF
 
   useEffect(() => {
-    const load = async () => {
+    let alive = true;
+    (async () => {
       try {
-        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' as RequestCache });
+        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
@@ -41,16 +42,18 @@ const Diretorio: React.FC = () => {
               return acc;
             }, []);
 
-        setContatos(normalize(lista));
+        if (alive) setContatos(normalize(lista));
       } catch (e: any) {
         console.error('Falha ao carregar diretório:', e);
-        setErro('Não foi possível carregar o diretório.');
-        setContatos([]);
+        if (alive) {
+          setErro('Não foi possível carregar o diretório.');
+          setContatos([]);
+        }
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
-    };
-    load();
+    })();
+    return () => { alive = false; };
   }, []);
 
   // SETORES (só valores que NÃO parecem cidade/UF)
@@ -139,7 +142,7 @@ const Diretorio: React.FC = () => {
               {filtrados.map((c) => (
                 <li key={String(c.id ?? `${c.nome}-${c.email ?? ''}`)} className="p-4 border rounded-lg">
                   <div className="text-lg font-semibold">{c.nome}</div>
-                  <div className="text-sm text-gray-600">{c.cargo}</div>
+                  {c.cargo && <div className="text-sm text-gray-600">{c.cargo}</div>}
                   <div className="text-xs text-gray-500 mt-1">
                     {[c.setor, c.cidade].filter(Boolean).join(' • ')}
                   </div>
@@ -159,6 +162,7 @@ const Diretorio: React.FC = () => {
 };
 
 export default Diretorio;
+export { Diretorio }; // ✅ named export para o App.tsx
 
 /* ===================== helpers ===================== */
 
