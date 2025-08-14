@@ -363,6 +363,31 @@ const ITPanel: React.FC = () => {
     }
   };
 
+  // Function to update TI solicitation status
+  const updateSolicitacao = async (id: string, status: string) => {
+    try {
+      const response = await fetch(`/api/ti/solicitacoes/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ status }),
+      });
+
+      if (response.ok) {
+        toast.success(`Solicitação ${status === 'aprovado' ? 'aprovada' : 'reprovada'} com sucesso!`);
+        loadDashboardData(); // Reload data
+      } else {
+        const errorData = await response.json();
+        toast.error(errorData.error || 'Erro ao atualizar solicitação');
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar solicitação:', error);
+      toast.error('Erro ao atualizar solicitação');
+    }
+  };
+
   const updateRequestStatus = async (id: number, newStatus: string) => {
     try {
       const response = await fetch(`${API_BASE}/api/ti/solicitacoes/${id}`, {
@@ -628,61 +653,14 @@ const HRPanel: React.FC = () => {
                 </div>
               </div>
             </div>
-          {/* Quick Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="bg-white p-6 rounded-lg shadow-sm">
-              <div className="flex items-center">
-                <div className="p-2 bg-yellow-100 rounded-lg">
-                  <Clock className="w-6 h-6 text-yellow-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Pendentes</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {tiSolicitacoes.filter(s => s.status === 'pendente').length}
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow-sm">
-              <div className="flex items-center">
-                <div className="p-2 bg-blue-100 rounded-lg">
-                  <CheckCircle className="w-6 h-6 text-blue-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Aprovadas</p>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {tiSolicitacoes.filter(s => s.status === 'aprovado').length}
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow-sm">
-              <div className="flex items-center">
-                <div className="p-2 bg-green-100 rounded-lg">
-                  <Monitor className="w-6 h-6 text-green-600" />
-                </div>
-                <div className="ml-4">
-                  <p className="text-sm font-medium text-gray-600">Total</p>
-                  <p className="text-2xl font-bold text-gray-900">{tiSolicitacoes.length}</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
           ))}
         </div>
       </div>
 
-            {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                <span className="ml-2 text-gray-600">Carregando...</span>
-              </div>
-            ) : tiSolicitacoes.length === 0 ? (
+      {/* Create Post Modal */}
       {showCreateModal && (
-                <Monitor className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4">
-                <p className="text-sm text-gray-500 mt-2">As solicitações de equipamentos aparecerão aqui</p>
             <div className="p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Nova Publicação</h2>
               <div className="space-y-4">
@@ -774,6 +752,42 @@ const UserManagement: React.FC = () => {
       setUsers([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      setCreatingUser(true);
+      console.log('Creating user with data:', newUser);
+      
+      const response = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(newUser),
+      });
+
+      console.log('Create user response status:', response.status);
+
+      if (response.ok) {
+        toast.success('Usuário criado com sucesso!');
+        setNewUser({ nome: '', email: '', setor: '', role: 'colaborador', senha: '' });
+        setShowAddUserModal(false);
+        loadDashboardData();
+      } else {
+        const errorData = await response.json();
+        console.error('Create user error:', errorData);
+        toast.error(errorData.error || 'Erro ao criar usuário');
+      }
+    } catch (error) {
+      console.error('Erro ao criar usuário:', error);
+      toast.error('Erro ao criar usuário');
+    } finally {
+      setCreatingUser(false);
     }
   };
 
