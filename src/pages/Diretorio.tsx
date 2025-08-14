@@ -12,7 +12,7 @@ type Contato = {
   email?: string;
 };
 
-const JSON_PATH = '/diretorio/diretorio.json'; // lido da pasta public
+const JSON_PATH = '/diretorio/diretorio.json'; // coloque o arquivo em public/diretorio/diretorio.json
 
 const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -28,7 +28,7 @@ const Diretorio: React.FC = () => {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
+        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' } as RequestInit);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
@@ -162,7 +162,7 @@ const Diretorio: React.FC = () => {
 };
 
 export default Diretorio;
-export { Diretorio }; // ✅ named export para o App.tsx
+export { Diretorio };
 
 /* ===================== helpers ===================== */
 
