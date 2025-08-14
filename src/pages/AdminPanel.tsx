@@ -628,14 +628,61 @@ const HRPanel: React.FC = () => {
                 </div>
               </div>
             </div>
+          {/* Quick Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="bg-white p-6 rounded-lg shadow-sm">
+              <div className="flex items-center">
+                <div className="p-2 bg-yellow-100 rounded-lg">
+                  <Clock className="w-6 h-6 text-yellow-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Pendentes</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {tiSolicitacoes.filter(s => s.status === 'pendente').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow-sm">
+              <div className="flex items-center">
+                <div className="p-2 bg-blue-100 rounded-lg">
+                  <CheckCircle className="w-6 h-6 text-blue-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Aprovadas</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    {tiSolicitacoes.filter(s => s.status === 'aprovado').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow-sm">
+              <div className="flex items-center">
+                <div className="p-2 bg-green-100 rounded-lg">
+                  <Monitor className="w-6 h-6 text-green-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Total</p>
+                  <p className="text-2xl font-bold text-gray-900">{tiSolicitacoes.length}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           ))}
         </div>
       </div>
 
-      {/* Create Post Modal */}
+            {loading ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <span className="ml-2 text-gray-600">Carregando...</span>
+              </div>
+            ) : tiSolicitacoes.length === 0 ? (
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <Monitor className="w-16 h-16 text-gray-400 mx-auto mb-4" />
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4">
+                <p className="text-sm text-gray-500 mt-2">As solicitações de equipamentos aparecerão aqui</p>
             <div className="p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Nova Publicação</h2>
               <div className="space-y-4">
