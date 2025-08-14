@@ -1,99 +1,65 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
-import { Search, Phone, Mail, MapPin, Building, BadgeCheck } from 'lucide-react';
+import { Phone, Mail, Building2, Search } from 'lucide-react';
+import toast from 'react-hot-toast';
 
-type Representante = {
-  id: string;
-  nome: string;
-  cargo?: string;
-  setor?: string;        // região (ex.: Erechim - RS)
-  email?: string;
-  telefone?: string;
-  localizacao?: string;  // às vezes igual ao setor
-  razaoSocial?: string;
-  ramal?: string | null;
-  foto?: string;
-};
-
-type MembroEquipe = {
-  id: string;
+type Contato = {
+  id?: string | number;
   nome: string;
   cargo?: string;
   setor?: string;
-  email?: string;
+  cidade?: string;
+  ramal?: string | number | null;
   telefone?: string;
-  ramal?: string | null;
-  localizacao?: string;
-  foto?: string;
+  email?: string;
 };
 
-type FuncionariosJSON = {
-  representantes?: Representante[];
-  equipe_apucarana_pr?: MembroEquipe[];
-};
-
-type Employee = {
-  id: string;
-  nome: string;
-  cargo: string;
-  setor: string;         // usado para agrupar
-  email?: string;
-  telefone?: string;
-  ramal?: string | null;
-  cidade?: string;       // mapeamos de localizacao quando fizer sentido
-  razaoSocial?: string;
-  foto?: string;
-  origem: 'representante' | 'equipe';
-};
+const JSON_PATH = `${import.meta.env.BASE_URL || '/'}diretorio/diretorio.json`;
 
 export const Diretorio: React.FC = () => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [allEmployees, setAllEmployees] = useState<Employee[]>([]);
+  const [contatos, setContatos] = useState<Contato[]>([]);
   const [loading, setLoading] = useState(true);
-  const [origem, setOrigem] = useState<'todos' | 'representante' | 'equipe'>('todos');
+  const [q, setQ] = useState('');
+  const [setor, setSetor] = useState<string>(''); // filtro por setor
 
-  // Carrega UMA vez de public/dados/funcionarios.json
   useEffect(() => {
     const load = async () => {
       try {
-        const url = `/api/contatos`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error('Falha ao carregar funcionarios.json');
+        // 1) tenta carregar o JSON estático do /public
+        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // remove BOM se existir
         const text = await res.text();
-        const json: FuncionariosJSON = text ? JSON.parse(text) : {};
+        const clean = text.replace(/^\uFEFF/, '');
+        const data = JSON.parse(clean);
 
-        const reps = (json.representantes || []).map<Employee>((r) => ({
-          id: r.id,
-          nome: r.nome,
-          cargo: r.cargo && r.cargo.trim() ? r.cargo : 'Representante Comercial',
-          setor: r.setor || r.localizacao || '—',
-          email: r.email || undefined,
-          telefone: r.telefone || undefined,
-          ramal: r.ramal ?? undefined,
-          cidade: r.localizacao || undefined,
-          razaoSocial: r.razaoSocial || undefined,
-          foto: r.foto,
-          origem: 'representante',
-        }));
+        const lista: Contato[] = Array.isArray(data)
+          ? data
+          : Array.isArray(data?.contatos)
+          ? data.contatos
+          : Array.isArray(data?.colaboradores)
+          ? data.colaboradores
+          : [];
 
-        const equipe = (json.equipe_apucarana_pr || []).map<Employee>((e) => ({
-          id: e.id,
-          nome: e.nome,
-          cargo: e.cargo || 'Colaborador',
-          setor: e.setor || e.localizacao || '—',
-          email: e.email || undefined,
-          telefone: e.telefone || undefined,
-          ramal: e.ramal ?? undefined,
-          cidade: e.localizacao || undefined,
-          razaoSocial: undefined,
-          foto: e.foto,
-          origem: 'equipe',
-        }));
-
-        setAllEmployees([...reps, ...equipe]);
-      } catch (err) {
-        console.error('Erro ao carregar funcionários:', err);
-        setAllEmployees([]);
+        setContatos(normalize(lista));
+      } catch (e1) {
+        console.warn('Falhou carregar JSON estático, tentando /api/contatos…', e1);
+        try {
+          // 2) fallback para API
+          const res = await fetch('/api/contatos', { credentials: 'include' });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+          const lista: Contato[] = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.contatos)
+            ? data.contatos
+            : [];
+          setContatos(normalize(lista));
+        } catch (e2) {
+          console.error('Falha também na API /api/contatos:', e2);
+          toast.error('Não foi possível carregar o diretório.');
+          setContatos([]);
+        }
       } finally {
         setLoading(false);
       }
@@ -101,181 +67,116 @@ export const Diretorio: React.FC = () => {
     load();
   }, []);
 
-  const filtered = useMemo(() => {
-    let list = allEmployees;
-    if (origem !== 'todos') list = list.filter((p) => p.origem === origem);
+  const setores = useMemo(() => {
+    const s = new Set<string>();
+    contatos.forEach(c => c.setor && s.add(c.setor));
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contatos]);
 
-    if (!searchTerm) return list;
-
-    const q = searchTerm.toLowerCase();
-    const s = (v?: string | null) => (typeof v === 'string' ? v.toLowerCase() : '');
-
-    return list.filter((c) =>
-      s(c.nome).includes(q) ||
-      s(c.email).includes(q) ||
-      s(c.telefone).includes(q) ||
-      s(c.ramal || '').includes(q) ||
-      s(c.setor).includes(q) ||
-      s(c.cargo).includes(q) ||
-      s(c.cidade).includes(q) ||
-      s(c.razaoSocial).includes(q)
-    );
-  }, [allEmployees, origem, searchTerm]);
-
-  const grouped = useMemo(() => {
-    return filtered.reduce((acc, emp) => {
-      const key = emp.setor || 'Sem setor';
-      (acc[key] ||= []).push(emp);
-      return acc;
-    }, {} as Record<string, Employee[]>);
-  }, [filtered]);
+  const filtrados = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    return contatos.filter(c => {
+      const matchTexto =
+        !term ||
+        [c.nome, c.cargo, c.setor, c.cidade, c.telefone, c.email]
+          .filter(Boolean)
+          .some(v => String(v).toLowerCase().includes(term));
+      const matchSetor = !setor || (c.setor || '') === setor;
+      return matchTexto && matchSetor;
+    });
+  }, [contatos, q, setor]);
 
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
           <h1 className="text-2xl font-bold text-gray-900">Diretório Corporativo</h1>
-          <div className="text-sm text-gray-600">
-            {filtered.length} pessoas encontradas
+          <div className="flex items-center gap-2 w-full md:w-auto">
+            <div className="relative flex-1 md:w-80">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={q}
+                onChange={e => setQ(e.target.value)}
+                placeholder="Buscar por nome, cargo, cidade, e-mail…"
+                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <select
+              value={setor}
+              onChange={e => setSetor(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="">Todos os setores</option>
+              {setores.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Filtros */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Pesquisar</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Nome, cargo, email, setor, cidade, razão social…"
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-            </div>
+          {loading ? (
+            <div className="text-center py-12 text-gray-500">Carregando diretório…</div>
+          ) : filtrados.length === 0 ? (
+            <div className="text-center py-12 text-gray-500">Nenhum contato encontrado.</div>
+          ) : (
+            <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {filtrados.map((c) => (
+                <li key={c.id ?? `${c.nome}-${c.email}`} className="p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="text-lg font-semibold text-gray-900">{c.nome}</div>
+                      <div className="text-sm text-gray-600">{c.cargo}</div>
+                      <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
+                        <Building2 className="w-3 h-3" />
+                        <span>{[c.setor, c.cidade].filter(Boolean).join(' • ')}</span>
+                      </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Origem</label>
-              <div className="flex bg-gray-100 rounded-lg p-1">
-                {(['todos', 'representante', 'equipe'] as const).map((opt) => (
-                  <button
-                    key={opt}
-                    onClick={() => setOrigem(opt)}
-                    className={`flex-1 px-3 py-2 rounded-md text-sm font-medium transition
-                      ${origem === opt ? 'bg-white shadow text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}
-                    title={
-                      opt === 'representante'
-                        ? 'Mostrar apenas representantes'
-                        : opt === 'equipe'
-                        ? 'Mostrar apenas equipe interna'
-                        : 'Mostrar todos'
-                    }
-                  >
-                    {opt === 'todos' ? 'Todos' : opt === 'representante' ? 'Representantes' : 'Equipe'}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Loading */}
-        {loading && (
-          <div className="flex items-center justify-center py-12">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          </div>
-        )}
-
-        {/* Listagem */}
-        {!loading && (
-          <div className="space-y-8">
-            {Object.entries(grouped).map(([setor, pessoas]) => (
-              <div key={setor} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <div className="flex items-center gap-3 mb-6">
-                  <Building className="w-6 h-6 text-blue-600" />
-                  <h2 className="text-xl font-semibold text-gray-900">{setor}</h2>
-                  <span className="px-3 py-1 text-sm font-medium bg-blue-100 text-blue-800 rounded-full">
-                    {pessoas.length} {pessoas.length === 1 ? 'pessoa' : 'pessoas'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {pessoas.map((p) => (
-                    <div key={p.id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
-                      <div className="flex items-start gap-4">
-                        <img
-                          src={p.foto || 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150'}
-                          alt={p.nome}
-                          className="w-12 h-12 rounded-full object-cover"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-gray-900 truncate">{p.nome}</h3>
-                            {p.origem === 'representante' && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
-                                Representante
-                              </span>
-                            )}
-                            {p.origem === 'equipe' && (
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                                Equipe
-                              </span>
-                            )}
+                      <div className="mt-3 space-y-1 text-sm">
+                        {c.telefone && (
+                          <div className="flex items-center gap-2 text-gray-700">
+                            <Phone className="w-4 h-4" />
+                            <a href={`tel:${cleanTel(c.telefone)}`} className="hover:underline">{c.telefone}</a>
+                            {c.ramal ? <span className="text-gray-400">• Ramal {c.ramal}</span> : null}
                           </div>
-                          <p className="text-sm text-gray-600 truncate">{p.cargo}</p>
-
-                          <div className="mt-3 space-y-2">
-                            <div className="flex items-center gap-2">
-                              <Mail className="w-4 h-4 text-gray-400" />
-                              {p.email ? (
-                                <a href={`mailto:${p.email}`} className="text-sm text-blue-600 hover:underline truncate">{p.email}</a>
-                              ) : (
-                                <span className="text-sm text-gray-400">sem e-mail</span>
-                              )}
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <Phone className="w-4 h-4 text-gray-400" />
-                              <span className="text-sm text-gray-600">{p.telefone || '—'}</span>
-                              {p.ramal && <span className="text-xs text-gray-500">(ramal {p.ramal})</span>}
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <MapPin className="w-4 h-4 text-gray-400" />
-                              <span className="text-sm text-gray-600">{p.cidade || '—'}</span>
-                            </div>
-
-                            {p.razaoSocial && (
-                              <div className="flex items-center gap-2">
-                                <BadgeCheck className="w-4 h-4 text-gray-400" />
-                                <span className="text-sm text-gray-600 truncate">{p.razaoSocial}</span>
-                              </div>
-                            )}
+                        )}
+                        {c.email && (
+                          <div className="flex items-center gap-2 text-gray-700">
+                            <Mail className="w-4 h-4" />
+                            <a href={`mailto:${c.email}`} className="hover:underline">{c.email}</a>
                           </div>
-                        </div>
+                        )}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-
-            {/* vazio */}
-            {filtered.length === 0 && (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                  <Search className="w-8 h-8 text-gray-400" />
-                </div>
-                <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhum registro encontrado</h3>
-                <p className="text-gray-600">Tente ajustar a busca ou a origem.</p>
-              </div>
-            )}
-          </div>
-        )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </Layout>
   );
 };
+
+// --- helpers ---
+
+function normalize(lista: any[]): Contato[] {
+  return lista.map((r, i) => ({
+    id: r.id ?? i,
+    nome: r.nome ?? r.name ?? '',
+    cargo: r.cargo ?? r.role ?? r.funcao ?? '',
+    setor: r.setor ?? r.sector ?? r.departamento ?? '',
+    cidade: r.cidade ?? r.city ?? '',
+    ramal: r.ramal ?? r.extension ?? null,
+    telefone: r.telefone ?? r.phone ?? '',
+    email: r.email ?? r.mail ?? '',
+  }));
+}
+
+function cleanTel(t?: string) {
+  if (!t) return '';
+  return t.replace(/[^\d+]/g, '');
+}
+
+export default Diretorio;
