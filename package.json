@@ -19,7 +19,6 @@
     "@fullcalendar/timegrid": "^6.1.18",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
-    "caniuse-lite": "^1.0.30001735",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "date-fns": "^3.6.0",
