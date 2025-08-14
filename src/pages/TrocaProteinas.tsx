@@ -1,399 +1,300 @@
-// src/pages/AdminPanel.tsx
-import React, { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useMemo, useEffect, useState } from 'react';
 import { Layout } from '../components/Layout';
-import {
-  Users, CalendarDays, ClipboardList, Wrench, RefreshCw, Settings,
-  FileText, Building2, ShieldCheck, ChevronRight
-} from 'lucide-react';
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, parseISO } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { useAuth } from '../contexts/AuthContext';
+import { useGamification } from '../contexts/GamificationContext';
 
-// Opcional: se você usa proxy do Vite, pode deixar vazio.
+const PROTEIN_OPTIONS = ['Frango','Omelete','Ovo frito','Ovo cozido'] as const;
+type ProteinLabel = typeof PROTEIN_OPTIONS[number];
+
+const ORIGINAL_SENTINEL = '__ORIGINAL__';
+
+/** Normaliza textos do cardápio para uma das 4 opções (ou '' se não reconhecer). */
+const normalizeProtein = (v: string): ProteinLabel | '' => {
+  const s = (v || '').trim().toLowerCase();
+  if (!s) return '';
+  if (s.includes('frango')) return 'Frango';
+  if (s.includes('omelete')) return 'Omelete';
+  if (s.includes('frito'))   return 'Ovo frito';
+  if (s.includes('cozid'))   return 'Ovo cozido';
+  return '';
+};
+
 const API_BASE = '';
 
-type Stats = {
-  reservas: number;
-  agendamentos: number;
-  solicitacoes: number;
-  trocas: number;
-  posts: number;
-  usuarios: number;
+type CardapioItem = {
+  id?: string;
+  dia?: string;
+  data: string;        // dd/MM/yyyy
+  prato?: string;
+  descricao?: string;
+  proteina: string;
+  acompanhamentos?: string[];
+  sobremesa?: string;
 };
 
-type SystemConfig = {
-  companyName?: string;
-  mural?: { allowedPublishers?: string[] };
-  gamificacao?: { pontos?: Record<string, number> };
-  reservas?: { salas?: string[] };
+type Troca = {
+  data: string;                 // ISO 'yyyy-MM-dd'
+  proteina_original: string;    // do cardápio padrão (pode estar vazio se não houver cardápio no dia)
+  proteina_nova?: string;
 };
 
-const DEFAULT_CFG: SystemConfig = {
-  companyName: 'Cropfield',
-  mural: { allowedPublishers: ['TI', 'RH'] },
-  gamificacao: { pontos: { muralPost: 1, reserva: 2, wifi: 1, trocaProteina: 2 } },
-  reservas: { salas: ['Aquário', 'Sala Grande', 'Sala Pequena', 'Sala Recepção'] }
-};
+export const TrocaProteinas: React.FC = () => {
+  const { user } = useAuth();
+  const { addActivity } = useGamification();
+  const [loading, setLoading] = useState(false);
+  const hoje = new Date();
 
-async function getJson<T = any>(url: string) {
-  const res = await fetch(url, { credentials: 'include' });
-  const text = await res.text();
-  let json: any = {};
-  try { json = text ? JSON.parse(text) : {}; } catch { /* ignora */ }
-  if (!res.ok || json?.ok === false) {
-    throw new Error(json?.error || res.statusText || `Erro em ${url}`);
-  }
-  return (json?.data ?? json) as T;
-}
+  const [cardapioPadrao, setCardapioPadrao] = useState<CardapioItem[]>([]);
+  const [cardapioLight, setCardapioLight] = useState<CardapioItem[]>([]);
+  const [trocas, setTrocas] = useState<Record<string, Troca>>({}); // key=data ISO
+  const [applyAllProtein, setApplyAllProtein] = useState<string>("");
 
-function monthRange(date = new Date()) {
-  const start = new Date(date.getFullYear(), date.getMonth(), 1);
-  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-  const toISO = (d: Date) => d.toISOString().slice(0, 10);
-  return { startISO: toISO(start), endISO: toISO(end) };
-}
-
-export const AdminPanel: React.FC = () => {
-  const [loadingStats, setLoadingStats] = useState(true);
-  const [stats, setStats] = useState<Stats>({
-    reservas: 0, agendamentos: 0, solicitacoes: 0, trocas: 0, posts: 0, usuarios: 0
-  });
-
-  const [showConfig, setShowConfig] = useState(false);
-  const [cfg, setCfg] = useState<SystemConfig>(DEFAULT_CFG);
-  const [savingCfg, setSavingCfg] = useState(false);
-  const [configSupported, setConfigSupported] = useState<boolean | null>(null);
-
-  // Carrega estatísticas
+  // Carrega cardápio (padrão + light) do mês e trocas já salvas
   useEffect(() => {
     (async () => {
-      setLoadingStats(true);
       try {
-        // 1) Tenta pegar de /api/admin/stats (se existir)
-        const s = await getJson<Partial<Stats>>(`${API_BASE}/api/admin/stats`);
-        setStats(prev => ({ ...prev, ...s as Stats }));
-      } catch {
-        // 2) Fallback: somar chamando endpoints existentes
-        try {
-          const todayISO = new Date().toISOString();
-          const { startISO, endISO } = monthRange(new Date());
+        // Load from static JSON files (ajuste os caminhos conforme seu projeto)
+        const [padrao, light] = await Promise.all([
+          fetch('/cardapio/cardapio-agosto-padrao.json').then(r => r.json()),
+          fetch('/cardapio/cardapio-agosto-light.json').then(r => r.json()),
+        ]);
+        setCardapioPadrao(Array.isArray(padrao) ? padrao : []);
+        setCardapioLight(Array.isArray(light) ? light : []);
 
-          const [usuarios, reservas, portaria, ti, trocas] = await Promise.all([
-            getJson<any[]>(`${API_BASE}/api/usuarios`).catch(() => []),
-            getJson<any[]>(`${API_BASE}/api/reservas-salas`).catch(() => []),
-            getJson<any[]>(`${API_BASE}/api/portaria`).catch(() => []),
-            getJson<any[]>(`${API_BASE}/api/equipamentos-ti`).catch(() => []),
-            // se sua API suportar filtro ?from=&to=:
-            getJson<any[]>(`${API_BASE}/api/trocas-proteina?from=${startISO}&to=${endISO}`).catch(() =>
-              getJson<any[]>(`${API_BASE}/api/trocas-proteina`).catch(() => [])
-            ),
-          ]);
-
-          // Regras básicas p/ contagem:
-          const reservasAtivas = reservas.filter((r: any) => (r.end ?? r.fim ?? r.termino ?? todayISO) >= todayISO).length;
-          const agMes = portaria.filter((p: any) => {
-            const d = new Date(p.data_hora || p.data || p.start || p.inicio || todayISO).toISOString().slice(0, 10);
-            return d >= startISO && d <= endISO;
-          }).length;
-          const solicitAbertas = ti.filter((s: any) => ['aberta', 'em_andamento', 'pendente'].includes((s.status || '').toLowerCase())).length;
-          const trocasMes = trocas.filter((t: any) => {
-            const d = new Date(t.data_iso || t.data || todayISO).toISOString().slice(0, 10);
-            return d >= startISO && d <= endISO;
-          }).length;
-
-          setStats({
-            reservas: reservasAtivas,
-            agendamentos: agMes,
-            solicitacoes: solicitAbertas,
-            trocas: trocasMes,
-            posts: 0, // ajuste se tiver endpoint do mural
-            usuarios: usuarios.length || 0,
-          });
-        } catch (e) {
-          toast.error('Falha ao carregar estatísticas.');
+        // Carregar trocas existentes no mês (seu backend já expõe esse GET)
+        const from = format(startOfMonth(hoje), 'yyyy-MM-01');
+        const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
+        const prevRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, { credentials: 'include' });
+        if (prevRes.ok) {
+          const prev = await prevRes.json();
+          const trocasData = prev.trocas || [];
+          const map: Record<string, Troca> = {};
+          for (const t of trocasData) {
+            const dataISO = format(new Date(t.data), 'yyyy-MM-dd');
+            map[dataISO] = { data: dataISO, proteina_original: t.proteina_original || "", proteina_nova: t.proteina_nova };
+          }
+          setTrocas(map);
         }
-      } finally {
-        setLoadingStats(false);
+      } catch (e) {
+        console.error(e);
+        toast.error('Falha ao carregar dados do cardápio.');
       }
     })();
-  }, []);
+  }, [hoje]);
 
-  // Configurações (modal)
-  const loadConfig = async () => {
-    try {
-      const raw = await getJson<{ config?: SystemConfig } | SystemConfig>(`${API_BASE}/api/admin/config`);
-      // Aceitar {config: {...}} ou {...} diretamente
-      const cfgData: any = (raw as any)?.config ?? raw ?? {};
-      setCfg({ ...DEFAULT_CFG, ...cfgData });
-      setConfigSupported(true);
-    } catch {
-      // servidor ainda não implementou /api/admin/config
-      setCfg(DEFAULT_CFG);
-      setConfigSupported(false);
+  // Todos os dias do mês (sempre)
+  const diasDoMes = useMemo(() => {
+    return eachDayOfInterval({ start: startOfMonth(hoje), end: endOfMonth(hoje) });
+  }, [hoje]);
+
+  // Mapa dataISO -> proteína original (vinda do cardápio padrão)
+  const originalByDate = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const it of cardapioPadrao) {
+      const [dd, mm, yyyy] = (it.data || '').split('/');
+      if (dd && mm && yyyy) {
+        const iso = `${yyyy}-${mm}-${dd}`;
+        map[iso] = it.proteina || '';
+      }
     }
-  };
+    return map;
+  }, [cardapioPadrao]);
 
-  const saveConfig = async () => {
-    try {
-      setSavingCfg(true);
-      const res = await fetch(`${API_BASE}/api/admin/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(cfg),
+  // Opções = união das proteínas que aparecem no mês (padrão + light)
+  const opcoesProteina = useMemo(() => {
+    // Limita às opções fixas de troca de proteína apenas
+    return [...PROTEIN_OPTIONS];
+  }, [cardapioPadrao, cardapioLight]);
+
+  // Alterar uma linha
+  const handleChange = (dataISO: string, nova: string) => {
+    const original = originalByDate[dataISO] || ''; // vazio se não houver cardápio naquele dia
+    
+    // Se o usuário escolheu vazio (manter original), removemos a troca
+    if (!nova || nova === ORIGINAL_SENTINEL) {
+      setTrocas(prev => {
+        const copy = { ...prev };
+        delete copy[dataISO];
+        return copy;
       });
-      if (!res.ok) throw new Error();
-      toast.success('Configurações salvas!');
-      setShowConfig(false);
-    } catch {
-      toast.error('Não foi possível salvar. Verifique se o endpoint /api/admin/config está implementado.');
+      return;
+    }
+    
+    // Garantir que a nova proteína está nas opções válidas
+    if (!PROTEIN_OPTIONS.includes(nova as ProteinLabel)) {
+      return; // Ignorar valores inválidos
+    }
+    
+    // Se igual à original, não precisamos da troca
+    const normalizedOriginal = normalizeProtein(original);
+    if (nova === normalizedOriginal) {
+      setTrocas(prev => {
+        const copy = { ...prev };
+        delete copy[dataISO];
+        return copy;
+      });
+      return;
+    }
+    
+    setTrocas(prev => ({ ...prev, [dataISO]: { data: dataISO, proteina_original: original, proteina_nova: nova } }));
+  };
+
+  // Aplicar para todos os dias disponíveis (com cardápio)
+  const aplicarParaTodos = () => {
+    const target = applyAllProtein.trim();
+    if (!target) {
+      toast('Escolha a proteína para aplicar em todos os dias.');
+      return;
+    }
+    if (opcoesProteina.length && !opcoesProteina.includes(target)) {
+      toast.error('Proteína inválida para este mês.');
+      return;
+    }
+    setTrocas(prev => {
+      const copy = { ...prev };
+      for (const d of diasDoMes) {
+        const iso = format(d, 'yyyy-MM-dd');
+        const original = originalByDate[iso] || '';
+        // Só aplicamos nos dias que têm cardápio (original não vazio) e quando a troca muda algo
+        if (original && target !== original) {
+          copy[iso] = { data: iso, proteina_original: original, proteina_nova: target };
+        } else {
+          // se não houver cardápio neste dia ou não muda nada, não mantemos troca
+          delete copy[iso];
+        }
+      }
+      return copy;
+    });
+    toast.success('Aplicado a todos os dias disponíveis do mês.');
+  };
+
+  // Salvar em lote (exemplo sem persistir — ajuste para integrar seu backend)
+  const salvar = async () => {
+    const payload = Object.values(trocas).filter(t => t.proteina_nova && t.proteina_nova !== t.proteina_original && t.proteina_original);
+    if (payload.length === 0) {
+      toast('Nenhuma troca para salvar.');
+      return;
+    }
+    
+    setLoading(true);
+    
+    try {
+      // Gamificação local
+      payload.forEach(troca => {
+        addActivity('protein_exchange', `Trocou proteína do dia ${format(parseISO(troca.data), 'dd/MM')}`, {
+          data: troca.data,
+          proteinaOriginal: troca.proteina_original,
+          proteinaNova: troca.proteina_nova,
+        });
+      });
+      
+      const totalPoints = payload.length * 5; // 5 pontos por troca
+      toast.success(`${payload.length} trocas salvas! +${totalPoints} pontos`);
+      
+      // Limpa trocas (simulação). Para persistir, faça POST no seu endpoint.
+      setTrocas({});
+    } catch (error) {
+      console.error('Erro ao salvar trocas:', error);
+      toast.error('Falha ao salvar trocas.');
     } finally {
-      setSavingCfg(false);
+      setLoading(false);
     }
   };
 
-  // Quando abrir o modal, tenta carregar config
-  useEffect(() => {
-    if (showConfig) loadConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showConfig]);
-
-  const cards = useMemo(() => ([
-    { label: 'Usuários', value: stats.usuarios, icon: Users, color: 'text-sky-600', bg: 'bg-sky-50', to: '/admin/usuarios' },
-    { label: 'Reservas ativas', value: stats.reservas, icon: CalendarDays, color: 'text-green-600', bg: 'bg-green-50', to: '/reservas' },
-    { label: 'Agendamentos (mês)', value: stats.agendamentos, icon: ClipboardList, color: 'text-purple-600', bg: 'bg-purple-50', to: '/portaria' },
-    { label: 'Solicitações TI', value: stats.solicitacoes, icon: Wrench, color: 'text-amber-600', bg: 'bg-amber-50', to: '/admin/painel-ti' },
-    { label: 'Trocas (mês)', value: stats.trocas, icon: RefreshCw, color: 'text-blue-600', bg: 'bg-blue-50', to: '/cardapio/trocas' },
-  ]), [stats]);
+  // Resumo simples
+  const totalSelecionadas = Object.values(trocas).filter(t => t.proteina_nova && t.proteina_nova !== t.proteina_original && t.proteina_original).length;
+  const totalDiasComCardapio = diasDoMes.filter(d => originalByDate[format(d, 'yyyy-MM-dd')]).length;
+  const faltantes = Math.max(totalDiasComCardapio - totalSelecionadas, 0);
 
   return (
     <Layout>
-      <div className="p-4 md:p-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+      <div className="p-4 md:p-6 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div>
-            <h1 className="text-xl md:text-2xl font-semibold">Painel Administrativo</h1>
+            <h1 className="text-xl md:text-2xl font-semibold">Troca de Proteínas</h1>
             <p className="text-sm text-slate-600">
-              Centralize operações: usuários, reservas de salas, portaria, TI e trocas de proteína.
+              Defina trocas usando as proteínas disponíveis no cardápio do mês. Você pode aplicar a mesma proteína para todos os dias disponíveis.
             </p>
+            <div className="mt-2 text-xs text-slate-500">
+              Selecionadas: <strong>{totalSelecionadas}</strong> · Restantes: <strong>{faltantes}</strong> (dias com cardápio)
+            </div>
           </div>
 
-          <div className="flex gap-2">
-            <Link
-              to="/admin/contatos"
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border hover:bg-slate-50"
+          <div className="flex items-center gap-2">
+            <select
+              className="border rounded-lg px-3 py-2"
+              value={applyAllProtein}
+              onChange={(e) => setApplyAllProtein(e.target.value)}
             >
-              <Building2 className="w-4 h-4" />
-              Contatos
-            </Link>
+              <option value="">Trocar todos os dias para…</option>
+              {opcoesProteina.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
             <button
-              onClick={() => setShowConfig(true)}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border hover:bg-slate-50"
+              onClick={aplicarParaTodos}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border hover:bg-slate-50"
             >
-              <Settings className="w-4 h-4" />
-              Configurar
+              <Repeat className="w-4 h-4" /> Aplicar em todos
+            </button>
+            <button
+              onClick={salvar}
+              disabled={loading}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white"
+            >
+              <Save className="w-4 h-4" /> {loading ? 'Salvando...' : 'Salvar seleções'}
             </button>
           </div>
         </div>
 
-        {/* Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          {cards.map(({ label, value, icon: Icon, color, bg, to }) => (
-            <Link
-              key={label}
-              to={to}
-              className="block"
-              title={`Ir para ${label}`}
-            >
-              <div className="relative rounded-xl border border-slate-200 p-4 hover:border-slate-300 transition-colors">
-                <div className={`inline-flex items-center justify-center w-9 h-9 rounded-lg ${bg} ${color}`}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <div className="mt-3 text-2xl font-semibold">{loadingStats ? '—' : value}</div>
-                <div className="text-sm text-slate-600">{label}</div>
-                <div className="absolute top-4 right-4 text-slate-400">
-                  <ChevronRight className="w-4 h-4" />
-                </div>
-              </div>
-            </Link>
-          ))}
+        <div className="overflow-auto rounded-xl border bg-white">
+          <table className="min-w-[860px] w-full text-sm">
+            <thead className="bg-slate-50">
+              <tr>
+                <th className="px-3 py-2 text-left">Data</th>
+                <th className="px-3 py-2 text-left">Proteína do Cardápio</th>
+                <th className="px-3 py-2 text-left">Trocar para</th>
+              </tr>
+            </thead>
+            <tbody>
+              {diasDoMes.filter(d => originalByDate[format(d, 'yyyy-MM-dd')]).map((d) => {
+                const dataISO = format(d, 'yyyy-MM-dd');
+                const original = originalByDate[dataISO] || ''; // vazio quando não há cardápio
+                const selected = trocas[dataISO]?.proteina_nova || "";
+
+                return (
+                  <tr key={dataISO} className="border-t">
+                    <td className="px-3 py-2">{format(d, 'dd/MM/yyyy (EEE)', { locale: ptBR })}</td>
+                    <td className="px-3 py-2">{original}</td>
+                    <td className="px-3 py-2 relative z-10 pointer-events-auto">
+                      <select
+                        className="border rounded-lg px-2 py-1 w-full"
+                        value={selected}
+                        onChange={(e) => handleChange(dataISO, e.target.value)}
+                        onMouseDown={(e)=>e.stopPropagation()}
+                        onClick={(e)=>e.stopPropagation()}
+                        onKeyDown={(e)=>e.stopPropagation()}
+                      >
+                        <option value="">— Manter original —</option>
+                        {PROTEIN_OPTIONS.map((p) => (
+                          <option key={p} value={p} disabled={normalizeProtein(original) === p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
-
-        {/* Ações rápidas */}
-        <div className="bg-white rounded-xl border p-4">
-          <h3 className="text-base font-semibold mb-3 flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" /> Ações rápidas
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <Link to="/admin/usuarios" className="p-4 border rounded-lg hover:border-blue-300 transition-colors block">
-              <div className="flex items-center gap-3">
-                <Users className="w-5 h-5 text-sky-600" />
-                <div>
-                  <div className="font-medium">Gerenciar Usuários</div>
-                  <div className="text-xs text-slate-600">Criar, editar, remover</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="/reservas" className="p-4 border rounded-lg hover:border-blue-300 transition-colors block">
-              <div className="flex items-center gap-3">
-                <CalendarDays className="w-5 h-5 text-green-600" />
-                <div>
-                  <div className="font-medium">Reservas de Salas</div>
-                  <div className="text-xs text-slate-600">Agendar e administrar</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="/portaria" className="p-4 border rounded-lg hover:border-blue-300 transition-colors block">
-              <div className="flex items-center gap-3">
-                <ClipboardList className="w-5 h-5 text-purple-600" />
-                <div>
-                  <div className="font-medium">Agendamentos da Portaria</div>
-                  <div className="text-xs text-slate-600">Visitantes e recepção</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="/admin/painel-ti" className="p-4 border rounded-lg hover:border-blue-300 transition-colors block">
-              <div className="flex items-center gap-3">
-                <Wrench className="w-5 h-5 text-amber-600" />
-                <div>
-                  <div className="font-medium">Solicitações de TI</div>
-                  <div className="text-xs text-slate-600">Abrir e dar andamento</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="/cardapio/trocas" className="p-4 border rounded-lg hover:border-blue-300 transition-colors block">
-              <div className="flex items-center gap-3">
-                <RefreshCw className="w-5 h-5 text-blue-600" />
-                <div>
-                  <div className="font-medium">Troca de Proteínas</div>
-                  <div className="text-xs text-slate-600">Solicitar/gerenciar trocas</div>
-                </div>
-              </div>
-            </Link>
-
-            <Link to="/mural" className="p-4 border rounded-lg hover:border-blue-300 transition-colors block">
-              <div className="flex items-center gap-3">
-                <FileText className="w-5 h-5 text-rose-600" />
-                <div>
-                  <div className="font-medium">Mural de Informações</div>
-                  <div className="text-xs text-slate-600">Publicar e revisar posts</div>
-                </div>
-              </div>
-            </Link>
-          </div>
-        </div>
-
-        {/* Modal de Configurações */}
-        {showConfig && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center">
-            <div className="bg-white rounded-xl w-full max-w-2xl p-6 shadow-lg">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Configurações do Sistema</h3>
-
-              {configSupported === false && (
-                <div className="mb-4 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                  O endpoint <code>/api/admin/config</code> não está disponível. Salvar aqui não terá efeito
-                  até que ele seja implementado no backend.
-                </div>
-              )}
-
-              <div className="space-y-4">
-                {/* Nome da Empresa */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">Nome da empresa</label>
-                  <input
-                    className="w-full border rounded-lg px-3 py-2"
-                    value={cfg.companyName || ''}
-                    onChange={e => setCfg({ ...cfg, companyName: e.target.value })}
-                  />
-                </div>
-
-                {/* Salas (csv) */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">Salas (separadas por vírgula)</label>
-                  <input
-                    className="w-full border rounded-lg px-3 py-2"
-                    value={(cfg.reservas?.salas || []).join(', ')}
-                    onChange={e => setCfg({
-                      ...cfg,
-                      reservas: { ...(cfg.reservas || {}), salas: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }
-                    })}
-                  />
-                </div>
-
-                {/* Publicadores do Mural */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">Pode publicar no Mural</label>
-                  <div className="flex gap-4">
-                    {['TI', 'RH', 'Admin'].map(opt => {
-                      const allowed = new Set(cfg.mural?.allowedPublishers || []);
-                      const checked = allowed.has(opt);
-                      return (
-                        <label key={opt} className="inline-flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              const next = new Set(cfg.mural?.allowedPublishers || []);
-                              e.target.checked ? next.add(opt) : next.delete(opt);
-                              setCfg({ ...cfg, mural: { ...(cfg.mural || {}), allowedPublishers: Array.from(next) } });
-                            }}
-                          />
-                          <span>{opt}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Pontos de Gamificação */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">Pontos de Gamificação</label>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {[
-                      ['muralPost','Post no Mural'],
-                      ['reserva','Reserva de Sala'],
-                      ['wifi','Wi-Fi'],
-                      ['trocaProteina','Troca de Proteína'],
-                    ].map(([key, label]) => (
-                      <div key={key}>
-                        <span className="text-sm text-gray-700">{label}</span>
-                        <input
-                          type="number"
-                          className="w-full border rounded-lg px-3 py-2 mt-1"
-                          value={Number(cfg.gamificacao?.pontos?.[key as any] ?? 0)}
-                          onChange={e => setCfg({
-                            ...cfg,
-                            gamificacao: {
-                              ...(cfg.gamificacao || {}),
-                              pontos: { ...(cfg.gamificacao?.pontos || {}), [key]: Number(e.target.value) }
-                            }
-                          })}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-6 flex justify-end gap-3">
-                <button onClick={() => setShowConfig(false)} className="px-4 py-2 rounded-lg border">Cancelar</button>
-                <button
-                  onClick={saveConfig}
-                  disabled={savingCfg || configSupported === false}
-                  className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-60"
-                >
-                  {savingCfg ? 'Salvando...' : 'Salvar'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </Layout>
   );
 };
 
-export default AdminPanel;
+// ✅ export nomeado e default
+export default TrocaProteinas;
