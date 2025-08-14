@@ -7,55 +7,50 @@ type Contato = {
   id?: string | number;
   nome: string;
   cargo?: string;
-  setor?: string;
-  cidade?: string;
+  setor?: string;   // apenas setores reais (Comercial, Financeiro, etc.)
+  cidade?: string;  // cidade/UF (ex.: "Apucarana - PR")
   ramal?: string | number | null;
   telefone?: string;
   email?: string;
 };
 
-const JSON_PATH = `${import.meta.env.BASE_URL || '/'}dados/contatos-cropfield.json`; // coloque o arquivo em public/dados/contatos-cropfield.json
+const JSON_PATH = `${import.meta.env.BASE_URL || '/'}diretorio/diretorio.json`;
 
-export const Diretorio: React.FC = () => {
+const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
   const [loading, setLoading] = useState(true);
 
   // filtros
   const [q, setQ] = useState('');
-  const [setor, setSetor] = useState<string>('');   // filtro por setor
+  const [setor, setSetor] = useState<string>('');   // filtro por setor (apenas setores reais)
   const [cidade, setCidade] = useState<string>(''); // filtro por cidade
 
   useEffect(() => {
     const load = async () => {
       try {
-        // 1) tenta JSON estático (unifica representantes + equipe_apucarana_pr)
+        // 1) tenta carregar o JSON estático do /public
         const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
-        const clean = text.replace(/^\uFEFF/, '');
+        const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
         const data = JSON.parse(clean);
 
-        const baseLista: any[] =
-          Array.isArray(data) ? data :
-          Array.isArray(data?.contatos) ? data.contatos :
-          Array.isArray(data?.colaboradores) ? data.colaboradores :
-          (Array.isArray(data?.representantes) || Array.isArray(data?.equipe_apucarana_pr))
-            ? [ ...(data.representantes ?? []), ...(data.equipe_apucarana_pr ?? []) ]
-            : [];
+        const lista: any[] = Array.isArray(data)
+          ? data
+          : Object.values(data).filter(Array.isArray).flat() as any[];
 
-        setContatos(normalize(baseLista));
+        setContatos(normalize(lista));
       } catch (e1) {
         console.warn('Falhou JSON estático; tentando /api/contatos', e1);
         try {
-          // 2) fallback API
+          // 2) fallback para API
           const res = await fetch('/api/contatos', { credentials: 'include' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
-          const baseLista: any[] =
-            Array.isArray(data) ? data :
-            Array.isArray(data?.contatos) ? data.contatos :
-            Array.isArray(data?.colaboradores) ? data.colaboradores : [];
-          setContatos(normalize(baseLista));
+          const lista: any[] = Array.isArray(data)
+            ? data
+            : Object.values(data).filter(Array.isArray).flat() as any[];
+          setContatos(normalize(lista));
         } catch (e2) {
           console.error('Falhou também /api/contatos:', e2);
           toast.error('Não foi possível carregar o diretório.');
@@ -68,18 +63,24 @@ export const Diretorio: React.FC = () => {
     load();
   }, []);
 
+  // SETORES: apenas valores que NÃO parecem cidade/UF
   const setores = useMemo(() => {
     const s = new Set<string>();
-    contatos.forEach(c => c.setor && s.add(c.setor));
+    contatos.forEach(c => {
+      const v = (c.setor || '').trim();
+      if (v && !isLocationLike(v)) s.add(v); // ignora "Apucarana - PR", etc.
+    });
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [contatos]);
 
+  // CIDADES: pegamos de c.cidade (já normalizada)
   const cidades = useMemo(() => {
     const s = new Set<string>();
     contatos.forEach(c => c.cidade && s.add(c.cidade));
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [contatos]);
 
+  // FILTRAGEM
   const filtrados = useMemo(() => {
     const term = q.trim().toLowerCase();
     return contatos.filter(c => {
@@ -109,12 +110,12 @@ export const Diretorio: React.FC = () => {
               <input
                 value={q}
                 onChange={e => setQ(e.target.value)}
-                placeholder="Buscar por nome, cargo, cidade, e-mail…"
+                placeholder="Buscar por nome, cargo, setor, cidade, e-mail…"
                 className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
 
-            {/* Filtro Setor */}
+            {/* Filtro Setor (apenas setores reais) */}
             <select
               value={setor}
               onChange={e => setSetor(e.target.value)}
@@ -160,7 +161,7 @@ export const Diretorio: React.FC = () => {
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtrados.map((c) => (
-                <li key={c.id ?? `${c.nome}-${c.email ?? ''}`} className="p-4 border border-gray-200 rounded-lg">
+                <li key={c.id ?? `${c.nome}-${c.email}`} className="p-4 border border-gray-200 rounded-lg">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="text-lg font-semibold text-gray-900">{c.nome}</div>
@@ -197,26 +198,42 @@ export const Diretorio: React.FC = () => {
   );
 };
 
-// --- helpers ---
+export default Diretorio;
+
+/* ===================== helpers ===================== */
 
 function normalize(lista: any[]): Contato[] {
-  return lista.map((r, i) => ({
-    id: r.id ?? i,
-    nome: r.nome ?? r.name ?? '',
-    cargo: r.cargo ?? r.role ?? r.funcao ?? '',
-    setor: r.setor ?? r.sector ?? r.departamento ?? '',
-    // usa 'localizacao' do seu JSON como cidade
-    cidade: r.cidade ?? r.localizacao ?? r.city ?? '',
-    ramal: r.ramal ?? r.extension ?? null,
-    telefone: r.telefone ?? r.phone ?? '',
-    email: r.email ?? r.mail ?? '',
-  }));
+  return lista.map((r: any, i: number) => {
+    const rawSetor = r.setor ?? r.sector ?? r.departamento ?? '';
+    const cidadeRaw = r.cidade ?? r.city ?? r.localizacao ?? '';
+
+    // Se "setor" parece cidade/UF, move para cidade e zera setor
+    const setorFinal  = isLocationLike(rawSetor) ? '' : String(rawSetor || '');
+    const cidadeFinal = cidadeRaw ? String(cidadeRaw) : (isLocationLike(rawSetor) ? String(rawSetor) : '');
+
+    return {
+      id: r.id ?? i,
+      nome: r.nome ?? r.name ?? '',
+      cargo: r.cargo ?? r.role ?? r.funcao ?? '',
+      setor: setorFinal,
+      cidade: cidadeFinal,
+      ramal: r.ramal ?? r.extension ?? null,
+      telefone: r.telefone ?? r.phone ?? '',
+      email: r.email ?? r.mail ?? '',
+    };
+  });
+}
+
+// Detecta strings do tipo "Cidade - UF" ou "Cidade/UF"
+function isLocationLike(v?: string) {
+  if (!v) return false;
+  const t = v.trim();
+  const ufSlash = /\/[A-Z]{2}$/.test(t);     // "Apucarana/PR"
+  const ufDash  = /-\s*[A-Z]{2}$/.test(t);   // "Apucarana - PR"
+  return ufSlash || ufDash;
 }
 
 function cleanTel(t?: string) {
   if (!t) return '';
-  // mantém + e números
   return t.replace(/[^\d+]/g, '');
 }
-
-export default Diretorio;
