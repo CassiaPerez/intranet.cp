@@ -99,7 +99,7 @@ function App() {
                 path="/painel"
                 element={
                   <ProtectedRoute>
-                    <AdminPanel />
+                    <Navigate to="/admin" replace />
                   </ProtectedRoute>
                 }
               />
