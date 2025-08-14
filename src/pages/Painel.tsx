@@ -1,3 +1,4 @@
+// src/pages/Painel.tsx
 import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import {
@@ -26,7 +27,7 @@ import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 const API_BASE = '';
-const MURAL_BASE = '/api/mural/posts'; // <-- troque para '/api/rh/mural/posts' se for o seu backend
+const MURAL_BASE = '/api/mural/posts'; // troque para '/api/rh/mural/posts' se o seu backend usar esse caminho
 
 interface Usuario {
   id: string;
@@ -61,10 +62,10 @@ interface PostMural {
 }
 
 const ROLES = [
-  { value: 'colaborador', label: 'Colaborador', icon: User, color: 'bg-gray-100 text-gray-800' },
-  { value: 'ti',          label: 'TI',          icon: Settings, color: 'bg-blue-100 text-blue-800' },
-  { value: 'rh',          label: 'RH',          icon: Briefcase, color: 'bg-green-100 text-green-800' },
-  { value: 'admin',       label: 'Administrador', icon: Crown,  color: 'bg-purple-100 text-purple-800' },
+  { value: 'colaborador', label: 'Colaborador',   icon: User,      color: 'bg-gray-100 text-gray-800' },
+  { value: 'ti',          label: 'TI',            icon: Settings,  color: 'bg-blue-100 text-blue-800' },
+  { value: 'rh',          label: 'RH',            icon: Briefcase, color: 'bg-green-100 text-green-800' },
+  { value: 'admin',       label: 'Administrador', icon: Crown,     color: 'bg-purple-100 text-purple-800' },
 ];
 
 const SETORES = [
@@ -80,9 +81,24 @@ const STATUS_COLORS: Record<SolicitacaoTI['status'], string> = {
   concluida:  'bg-gray-100 text-gray-800',
 };
 
-export const AdminPanel: React.FC = () => {
+export const Painel: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('usuarios');
+  const role = (user?.role || 'colaborador') as Usuario['role'];
+  const isAdmin = role === 'admin';
+  const isRH    = role === 'rh' || isAdmin;
+  const isTI    = role === 'ti' || isAdmin;
+
+  const allTabs = [
+    { id: 'usuarios',      label: 'Usuários',        icon: Users,           roles: ['admin', 'rh'] },
+    { id: 'relatorios',    label: 'Relatórios',      icon: BarChart3,       roles: ['admin', 'rh', 'ti'] },
+    { id: 'configuracoes', label: 'Configurações',   icon: Settings,        roles: ['admin'] },
+    { id: 'ti',            label: 'Painel TI',       icon: Settings,        roles: ['admin', 'ti'] },
+    { id: 'rh',            label: 'Painel RH',       icon: Briefcase,       roles: ['admin', 'rh'] },
+    { id: 'cardapio',      label: 'Cardápio',        icon: UtensilsCrossed, roles: ['admin', 'rh'] },
+  ];
+  const availableTabs = allTabs.filter(t => t.roles.includes(role));
+
+  const [activeTab, setActiveTab] = useState(availableTabs[0]?.id || 'usuarios');
   const [loading, setLoading] = useState(false);
 
   // Usuários
@@ -121,26 +137,13 @@ export const AdminPanel: React.FC = () => {
   const [cardapioFile, setCardapioFile] = useState<File | null>(null);
   const [cardapioFormData, setCardapioFormData] = useState({ mes: '', tipo: 'padrao' as 'padrao' | 'light' });
 
-  const role = (user?.role || 'colaborador') as Usuario['role'];
-  const isAdmin = role === 'admin';
-  const isRH    = role === 'rh' || isAdmin;
-  const isTI    = role === 'ti' || isAdmin;
-
-  const allTabs = [
-    { id: 'usuarios',      label: 'Usuários',      icon: Users,        roles: ['admin', 'rh'] },
-    { id: 'relatorios',    label: 'Relatórios',    icon: BarChart3,    roles: ['admin', 'rh', 'ti'] },
-    { id: 'configuracoes', label: 'Configurações', icon: Settings,     roles: ['admin'] },
-    { id: 'ti',            label: 'Painel TI',     icon: Settings,     roles: ['admin', 'ti'] },
-    { id: 'rh',            label: 'Painel RH',     icon: Briefcase,    roles: ['admin', 'rh'] },
-    { id: 'cardapio',      label: 'Cardápio',      icon: UtensilsCrossed, roles: ['admin', 'rh'] },
-  ];
-  const availableTabs = allTabs.filter(t => t.roles.includes(role));
-
-  // Definir a primeira aba disponível ao carregar/alterar permissões
+  // Recalcula aba inicial quando as permissões mudarem
   useEffect(() => {
-    if (availableTabs.length > 0) setActiveTab(prev => availableTabs.some(t => t.id === prev) ? prev : availableTabs[0].id);
+    if (availableTabs.length > 0) {
+      setActiveTab(prev => availableTabs.some(t => t.id === prev) ? prev : availableTabs[0].id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableTabs.length, role]);
+  }, [role]);
 
   // Carregamentos por aba
   useEffect(() => {
@@ -156,12 +159,12 @@ export const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       const res = await fetch(`${API_BASE}/api/admin/users`, { credentials: 'include' });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) setUsuarios(data.users || []);
-      else toast.error(data.error || 'Erro ao carregar usuários');
-    } catch (e) {
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || 'Erro ao carregar usuários');
+      setUsuarios(j.users || []);
+    } catch (e: any) {
       console.error(e);
-      toast.error('Erro ao carregar usuários');
+      toast.error(e.message || 'Erro ao carregar usuários');
     } finally {
       setLoading(false);
     }
@@ -1068,4 +1071,4 @@ export const AdminPanel: React.FC = () => {
   );
 };
 
-export default AdminPanel;
+export default Painel;
