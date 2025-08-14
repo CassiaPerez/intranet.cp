@@ -14,7 +14,7 @@ type Contato = {
   email?: string;
 };
 
-const JSON_PATH = `${import.meta.env.BASE_URL || '/'}diretorio/diretorio.json`;
+const JSON_PATH = `${import.meta.env.BASE_URL || '/'}dados/contatos-cropfield.json`; // coloque o arquivo em public/dados/contatos-cropfield.json
 
 export const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -28,33 +28,34 @@ export const Diretorio: React.FC = () => {
   useEffect(() => {
     const load = async () => {
       try {
+        // 1) tenta JSON estático (unifica representantes + equipe_apucarana_pr)
         const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         const clean = text.replace(/^\uFEFF/, '');
         const data = JSON.parse(clean);
 
-        const lista: Contato[] = Array.isArray(data)
-          ? data
-          : Array.isArray(data?.contatos)
-          ? data.contatos
-          : Array.isArray(data?.colaboradores)
-          ? data.colaboradores
-          : [];
+        const baseLista: any[] =
+          Array.isArray(data) ? data :
+          Array.isArray(data?.contatos) ? data.contatos :
+          Array.isArray(data?.colaboradores) ? data.colaboradores :
+          (Array.isArray(data?.representantes) || Array.isArray(data?.equipe_apucarana_pr))
+            ? [ ...(data.representantes ?? []), ...(data.equipe_apucarana_pr ?? []) ]
+            : [];
 
-        setContatos(normalize(lista));
+        setContatos(normalize(baseLista));
       } catch (e1) {
         console.warn('Falhou JSON estático; tentando /api/contatos', e1);
         try {
+          // 2) fallback API
           const res = await fetch('/api/contatos', { credentials: 'include' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
-          const lista: Contato[] = Array.isArray(data)
-            ? data
-            : Array.isArray(data?.contatos)
-            ? data.contatos
-            : [];
-          setContatos(normalize(lista));
+          const baseLista: any[] =
+            Array.isArray(data) ? data :
+            Array.isArray(data?.contatos) ? data.contatos :
+            Array.isArray(data?.colaboradores) ? data.colaboradores : [];
+          setContatos(normalize(baseLista));
         } catch (e2) {
           console.error('Falhou também /api/contatos:', e2);
           toast.error('Não foi possível carregar o diretório.');
@@ -159,7 +160,7 @@ export const Diretorio: React.FC = () => {
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtrados.map((c) => (
-                <li key={c.id ?? `${c.nome}-${c.email}`} className="p-4 border border-gray-200 rounded-lg">
+                <li key={c.id ?? `${c.nome}-${c.email ?? ''}`} className="p-4 border border-gray-200 rounded-lg">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="text-lg font-semibold text-gray-900">{c.nome}</div>
@@ -204,7 +205,8 @@ function normalize(lista: any[]): Contato[] {
     nome: r.nome ?? r.name ?? '',
     cargo: r.cargo ?? r.role ?? r.funcao ?? '',
     setor: r.setor ?? r.sector ?? r.departamento ?? '',
-    cidade: r.cidade ?? r.city ?? '',
+    // usa 'localizacao' do seu JSON como cidade
+    cidade: r.cidade ?? r.localizacao ?? r.city ?? '',
     ramal: r.ramal ?? r.extension ?? null,
     telefone: r.telefone ?? r.phone ?? '',
     email: r.email ?? r.mail ?? '',
@@ -213,6 +215,7 @@ function normalize(lista: any[]): Contato[] {
 
 function cleanTel(t?: string) {
   if (!t) return '';
+  // mantém + e números
   return t.replace(/[^\d+]/g, '');
 }
 
