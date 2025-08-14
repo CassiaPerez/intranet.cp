@@ -19,16 +19,17 @@ const JSON_PATH = `${import.meta.env.BASE_URL || '/'}diretorio/diretorio.json`;
 export const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // filtros
   const [q, setQ] = useState('');
-  const [setor, setSetor] = useState<string>(''); // filtro por setor
+  const [setor, setSetor] = useState<string>('');   // filtro por setor
+  const [cidade, setCidade] = useState<string>(''); // filtro por cidade
 
   useEffect(() => {
     const load = async () => {
       try {
-        // 1) tenta carregar o JSON estático do /public
         const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        // remove BOM se existir
         const text = await res.text();
         const clean = text.replace(/^\uFEFF/, '');
         const data = JSON.parse(clean);
@@ -43,9 +44,8 @@ export const Diretorio: React.FC = () => {
 
         setContatos(normalize(lista));
       } catch (e1) {
-        console.warn('Falhou carregar JSON estático, tentando /api/contatos…', e1);
+        console.warn('Falhou JSON estático; tentando /api/contatos', e1);
         try {
-          // 2) fallback para API
           const res = await fetch('/api/contatos', { credentials: 'include' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
@@ -56,7 +56,7 @@ export const Diretorio: React.FC = () => {
             : [];
           setContatos(normalize(lista));
         } catch (e2) {
-          console.error('Falha também na API /api/contatos:', e2);
+          console.error('Falhou também /api/contatos:', e2);
           toast.error('Não foi possível carregar o diretório.');
           setContatos([]);
         }
@@ -73,6 +73,12 @@ export const Diretorio: React.FC = () => {
     return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [contatos]);
 
+  const cidades = useMemo(() => {
+    const s = new Set<string>();
+    contatos.forEach(c => c.cidade && s.add(c.cidade));
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contatos]);
+
   const filtrados = useMemo(() => {
     const term = q.trim().toLowerCase();
     return contatos.filter(c => {
@@ -81,17 +87,22 @@ export const Diretorio: React.FC = () => {
         [c.nome, c.cargo, c.setor, c.cidade, c.telefone, c.email]
           .filter(Boolean)
           .some(v => String(v).toLowerCase().includes(term));
+
       const matchSetor = !setor || (c.setor || '') === setor;
-      return matchTexto && matchSetor;
+      const matchCidade = !cidade || (c.cidade || '') === cidade;
+
+      return matchTexto && matchSetor && matchCidade;
     });
-  }, [contatos, q, setor]);
+  }, [contatos, q, setor, cidade]);
 
   return (
     <Layout>
       <div className="space-y-6">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <h1 className="text-2xl font-bold text-gray-900">Diretório Corporativo</h1>
-          <div className="flex items-center gap-2 w-full md:w-auto">
+
+          <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
+            {/* Busca */}
             <div className="relative flex-1 md:w-80">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -101,16 +112,42 @@ export const Diretorio: React.FC = () => {
                 className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
             </div>
+
+            {/* Filtro Setor */}
             <select
               value={setor}
               onChange={e => setSetor(e.target.value)}
               className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              aria-label="Filtrar por setor"
             >
               <option value="">Todos os setores</option>
               {setores.map(s => (
                 <option key={s} value={s}>{s}</option>
               ))}
             </select>
+
+            {/* Filtro Cidade */}
+            <select
+              value={cidade}
+              onChange={e => setCidade(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              aria-label="Filtrar por cidade"
+            >
+              <option value="">Todas as cidades</option>
+              {cidades.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+
+            {/* Limpar filtros */}
+            {(setor || cidade || q) && (
+              <button
+                onClick={() => { setSetor(''); setCidade(''); setQ(''); }}
+                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Limpar filtros
+              </button>
+            )}
           </div>
         </div>
 
