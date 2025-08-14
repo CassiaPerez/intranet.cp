@@ -14,7 +14,7 @@ type Contato = {
   email?: string;
 };
 
-const JSON_PATH = `${import.meta.env.BASE_URL || '/'}diretorio/diretorio.json`;
+const JSON_PATH = '/diretorio/diretorio.json'; // funciona em Next e Vite (pasta public)
 
 const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -29,7 +29,7 @@ const Diretorio: React.FC = () => {
     const load = async () => {
       try {
         // 1) tenta carregar o JSON estático do /public
-        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' });
+        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' as RequestCache });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
         const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
@@ -37,19 +37,26 @@ const Diretorio: React.FC = () => {
 
         const lista: any[] = Array.isArray(data)
           ? data
-          : Object.values(data).filter(Array.isArray).flat() as any[];
+          : // junta quaisquer arrays que existam no objeto (ex.: representantes, equipe_apucarana_pr)
+            Object.values(data).reduce((acc: any[], v: any) => {
+              if (Array.isArray(v)) acc.push(...v);
+              return acc;
+            }, []);
 
         setContatos(normalize(lista));
       } catch (e1) {
         console.warn('Falhou JSON estático; tentando /api/contatos', e1);
         try {
-          // 2) fallback para API
+          // 2) fallback para API (opcional)
           const res = await fetch('/api/contatos', { credentials: 'include' });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = await res.json();
           const lista: any[] = Array.isArray(data)
             ? data
-            : Object.values(data).filter(Array.isArray).flat() as any[];
+            : Object.values(data).reduce((acc: any[], v: any) => {
+                if (Array.isArray(v)) acc.push(...v);
+                return acc;
+              }, []);
           setContatos(normalize(lista));
         } catch (e2) {
           console.error('Falhou também /api/contatos:', e2);
@@ -161,7 +168,7 @@ const Diretorio: React.FC = () => {
           ) : (
             <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {filtrados.map((c) => (
-                <li key={c.id ?? `${c.nome}-${c.email}`} className="p-4 border border-gray-200 rounded-lg">
+                <li key={String(c.id ?? `${c.nome}-${c.email ?? ''}`)} className="p-4 border border-gray-200 rounded-lg">
                   <div className="flex items-start justify-between">
                     <div>
                       <div className="text-lg font-semibold text-gray-900">{c.nome}</div>
@@ -204,7 +211,7 @@ export default Diretorio;
 
 function normalize(lista: any[]): Contato[] {
   return lista.map((r: any, i: number) => {
-    const rawSetor = r.setor ?? r.sector ?? r.departamento ?? '';
+    const rawSetor  = r.setor ?? r.sector ?? r.departamento ?? '';
     const cidadeRaw = r.cidade ?? r.city ?? r.localizacao ?? '';
 
     // Se "setor" parece cidade/UF, move para cidade e zera setor
@@ -227,7 +234,7 @@ function normalize(lista: any[]): Contato[] {
 // Detecta strings do tipo "Cidade - UF" ou "Cidade/UF"
 function isLocationLike(v?: string) {
   if (!v) return false;
-  const t = v.trim();
+  const t = String(v).trim();
   const ufSlash = /\/[A-Z]{2}$/.test(t);     // "Apucarana/PR"
   const ufDash  = /-\s*[A-Z]{2}$/.test(t);   // "Apucarana - PR"
   return ufSlash || ufDash;
@@ -235,5 +242,5 @@ function isLocationLike(v?: string) {
 
 function cleanTel(t?: string) {
   if (!t) return '';
-  return t.replace(/[^\d+]/g, '');
+  return String(t).replace(/[^\d+]/g, '');
 }
