@@ -1,222 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Layout } from '../components/Layout';
-import { Phone, Mail, Building2, Search } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { Search } from 'lucide-react';
+import diretorioData from '../data/diretorio.json';
 
-type Contato = {
-  id?: string | number;
-  nome: string;
-  cargo?: string;
-  setor?: string;   // apenas setores reais (Comercial, Financeiro, etc.)
-  cidade?: string;  // cidade/UF (ex.: "Apucarana - PR")
-  ramal?: string | number | null;
-  telefone?: string;
-  email?: string;
-};
+function isLocationLike(v?: string) {
+  if (!v) return false;
+  const t = v.trim();
+  const ufSlash = /\/[A-Z]{2}$/.test(t);
+  const ufDash  = /-\s*[A-Z]{2}$/.test(t);
+  return ufSlash || ufDash;
+}
 
-const JSON_PATH = '/diretorio/diretorio.json'; // funciona em Next e Vite (pasta public)
-
-const Diretorio: React.FC = () => {
-  const [contatos, setContatos] = useState<Contato[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // filtros
-  const [q, setQ] = useState('');
-  const [setor, setSetor] = useState<string>('');   // filtro por setor (apenas setores reais)
-  const [cidade, setCidade] = useState<string>(''); // filtro por cidade
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        // 1) tenta carregar o JSON estático do /public
-        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' as RequestCache });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const text = await res.text();
-        const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
-        const data = JSON.parse(clean);
-
-        const lista: any[] = Array.isArray(data)
-          ? data
-          : // junta quaisquer arrays que existam no objeto (ex.: representantes, equipe_apucarana_pr)
-            Object.values(data).reduce((acc: any[], v: any) => {
-              if (Array.isArray(v)) acc.push(...v);
-              return acc;
-            }, []);
-
-        setContatos(normalize(lista));
-      } catch (e1) {
-        console.warn('Falhou JSON estático; tentando /api/contatos', e1);
-        try {
-          // 2) fallback para API (opcional)
-          const res = await fetch('/api/contatos', { credentials: 'include' });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          const lista: any[] = Array.isArray(data)
-            ? data
-            : Object.values(data).reduce((acc: any[], v: any) => {
-                if (Array.isArray(v)) acc.push(...v);
-                return acc;
-              }, []);
-          setContatos(normalize(lista));
-        } catch (e2) {
-          console.error('Falhou também /api/contatos:', e2);
-          toast.error('Não foi possível carregar o diretório.');
-          setContatos([]);
-        }
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
-  }, []);
-
-  // SETORES: apenas valores que NÃO parecem cidade/UF
-  const setores = useMemo(() => {
-    const s = new Set<string>();
-    contatos.forEach(c => {
-      const v = (c.setor || '').trim();
-      if (v && !isLocationLike(v)) s.add(v); // ignora "Apucarana - PR", etc.
-    });
-    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [contatos]);
-
-  // CIDADES: pegamos de c.cidade (já normalizada)
-  const cidades = useMemo(() => {
-    const s = new Set<string>();
-    contatos.forEach(c => c.cidade && s.add(c.cidade));
-    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [contatos]);
-
-  // FILTRAGEM
-  const filtrados = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    return contatos.filter(c => {
-      const matchTexto =
-        !term ||
-        [c.nome, c.cargo, c.setor, c.cidade, c.telefone, c.email]
-          .filter(Boolean)
-          .some(v => String(v).toLowerCase().includes(term));
-
-      const matchSetor = !setor || (c.setor || '') === setor;
-      const matchCidade = !cidade || (c.cidade || '') === cidade;
-
-      return matchTexto && matchSetor && matchCidade;
-    });
-  }, [contatos, q, setor, cidade]);
-
-  return (
-    <Layout>
-      <div className="space-y-6">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <h1 className="text-2xl font-bold text-gray-900">Diretório Corporativo</h1>
-
-          <div className="flex items-center gap-2 w-full md:w-auto flex-wrap">
-            {/* Busca */}
-            <div className="relative flex-1 md:w-80">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <input
-                value={q}
-                onChange={e => setQ(e.target.value)}
-                placeholder="Buscar por nome, cargo, setor, cidade, e-mail…"
-                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
-            </div>
-
-            {/* Filtro Setor (apenas setores reais) */}
-            <select
-              value={setor}
-              onChange={e => setSetor(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              aria-label="Filtrar por setor"
-            >
-              <option value="">Todos os setores</option>
-              {setores.map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-
-            {/* Filtro Cidade */}
-            <select
-              value={cidade}
-              onChange={e => setCidade(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              aria-label="Filtrar por cidade"
-            >
-              <option value="">Todas as cidades</option>
-              {cidades.map(c => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-
-            {/* Limpar filtros */}
-            {(setor || cidade || q) && (
-              <button
-                onClick={() => { setSetor(''); setCidade(''); setQ(''); }}
-                className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
-              >
-                Limpar filtros
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          {loading ? (
-            <div className="text-center py-12 text-gray-500">Carregando diretório…</div>
-          ) : filtrados.length === 0 ? (
-            <div className="text-center py-12 text-gray-500">Nenhum contato encontrado.</div>
-          ) : (
-            <ul className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filtrados.map((c) => (
-                <li key={String(c.id ?? `${c.nome}-${c.email ?? ''}`)} className="p-4 border border-gray-200 rounded-lg">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-lg font-semibold text-gray-900">{c.nome}</div>
-                      <div className="text-sm text-gray-600">{c.cargo}</div>
-                      <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-                        <Building2 className="w-3 h-3" />
-                        <span>{[c.setor, c.cidade].filter(Boolean).join(' • ')}</span>
-                      </div>
-
-                      <div className="mt-3 space-y-1 text-sm">
-                        {c.telefone && (
-                          <div className="flex items-center gap-2 text-gray-700">
-                            <Phone className="w-4 h-4" />
-                            <a href={`tel:${cleanTel(c.telefone)}`} className="hover:underline">{c.telefone}</a>
-                            {c.ramal ? <span className="text-gray-400">• Ramal {c.ramal}</span> : null}
-                          </div>
-                        )}
-                        {c.email && (
-                          <div className="flex items-center gap-2 text-gray-700">
-                            <Mail className="w-4 h-4" />
-                            <a href={`mailto:${c.email}`} className="hover:underline">{c.email}</a>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </div>
-    </Layout>
-  );
-};
-
-export default Diretorio;
-
-/* ===================== helpers ===================== */
-
-function normalize(lista: any[]): Contato[] {
-  return lista.map((r: any, i: number) => {
-    const rawSetor  = r.setor ?? r.sector ?? r.departamento ?? '';
+function normalize(lista: any[]) {
+  return lista.map((r, i) => {
+    const rawSetor = r.setor ?? r.sector ?? r.departamento ?? '';
     const cidadeRaw = r.cidade ?? r.city ?? r.localizacao ?? '';
 
-    // Se "setor" parece cidade/UF, move para cidade e zera setor
-    const setorFinal  = isLocationLike(rawSetor) ? '' : String(rawSetor || '');
-    const cidadeFinal = cidadeRaw ? String(cidadeRaw) : (isLocationLike(rawSetor) ? String(rawSetor) : '');
+    const setorFinal  = isLocationLike(rawSetor) ? '' : rawSetor;
+    const cidadeFinal = cidadeRaw || (isLocationLike(rawSetor) ? rawSetor : '');
 
     return {
       id: r.id ?? i,
@@ -231,16 +32,99 @@ function normalize(lista: any[]): Contato[] {
   });
 }
 
-// Detecta strings do tipo "Cidade - UF" ou "Cidade/UF"
-function isLocationLike(v?: string) {
-  if (!v) return false;
-  const t = String(v).trim();
-  const ufSlash = /\/[A-Z]{2}$/.test(t);     // "Apucarana/PR"
-  const ufDash  = /-\s*[A-Z]{2}$/.test(t);   // "Apucarana - PR"
-  return ufSlash || ufDash;
-}
+export const Diretorio: React.FC = () => {
+  const [filtroSetor, setFiltroSetor] = useState('');
+  const [filtroCidade, setFiltroCidade] = useState('');
+  const [busca, setBusca] = useState('');
 
-function cleanTel(t?: string) {
-  if (!t) return '';
-  return String(t).replace(/[^\d+]/g, '');
-}
+  const contatos = useMemo(() => {
+    return [
+      ...normalize(diretorioData.representantes || []),
+      ...normalize(diretorioData.equipe_apucarana_pr || []),
+    ];
+  }, []);
+
+  const setores = useMemo(() => {
+    const s = new Set<string>();
+    contatos.forEach(c => {
+      const v = (c.setor || '').trim();
+      if (v && !isLocationLike(v)) s.add(v);
+    });
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contatos]);
+
+  const cidades = useMemo(() => {
+    const s = new Set<string>();
+    contatos.forEach(c => {
+      if (c.cidade) s.add(c.cidade);
+    });
+    return Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [contatos]);
+
+  const filtrados = contatos.filter(c => {
+    const buscaMatch =
+      busca === '' ||
+      c.nome.toLowerCase().includes(busca.toLowerCase()) ||
+      c.cargo.toLowerCase().includes(busca.toLowerCase());
+
+    const setorMatch = !filtroSetor || c.setor === filtroSetor;
+    const cidadeMatch = !filtroCidade || c.cidade === filtroCidade;
+
+    return buscaMatch && setorMatch && cidadeMatch;
+  });
+
+  return (
+    <Layout>
+      <div className="space-y-6">
+        <h1 className="text-2xl font-bold">Diretório</h1>
+
+        {/* Filtros */}
+        <div className="flex flex-wrap gap-4">
+          <input
+            type="text"
+            placeholder="Buscar por nome ou cargo..."
+            value={busca}
+            onChange={(e) => setBusca(e.target.value)}
+            className="border rounded-lg px-3 py-2 flex-1"
+          />
+
+          <select
+            value={filtroSetor}
+            onChange={(e) => setFiltroSetor(e.target.value)}
+            className="border rounded-lg px-3 py-2"
+          >
+            <option value="">Todos os setores</option>
+            {setores.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          <select
+            value={filtroCidade}
+            onChange={(e) => setFiltroCidade(e.target.value)}
+            className="border rounded-lg px-3 py-2"
+          >
+            <option value="">Todas as cidades</option>
+            {cidades.map(c => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Lista */}
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtrados.map(c => (
+            <div key={c.id} className="border rounded-lg p-4 shadow-sm">
+              <h2 className="font-bold">{c.nome}</h2>
+              <p className="text-sm text-gray-600">{c.cargo}</p>
+              {c.setor && <p className="text-sm">{c.setor}</p>}
+              {c.cidade && <p className="text-sm">{c.cidade}</p>}
+              {c.telefone && <p className="text-sm">{c.telefone}</p>}
+              {c.email && <p className="text-sm">{c.email}</p>}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Layout>
+  );
+};
