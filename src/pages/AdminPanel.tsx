@@ -1060,61 +1060,279 @@ const UserManagement: React.FC = () => {
   );
 };
 
-const MenuManagement: React.FC = () => {
-  const [uploadData, setUploadData] = useState({ mes: '', tipo: 'padrao', arquivo: null });
-  const [uploading, setUploading] = useState(false);
+const ReportsPanel: React.FC = () => {
+  const [dateRange, setDateRange] = useState({
+    from: new Date().toISOString().split('T')[0],
+    to: new Date().toISOString().split('T')[0]
+  });
+  const [loading, setLoading] = useState(false);
+  const [reportData, setReportData] = useState({
+    reservas: [],
+    trocas: [],
+    portaria: [],
+    ranking: []
+  });
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setUploadData({ ...uploadData, arquivo: file });
-    }
-  };
+  useEffect(() => {
+    loadReportData();
+  }, [dateRange]);
 
-  const uploadCardapio = async () => {
-    if (!uploadData.mes || !uploadData.arquivo) {
-      toast.error('Selecione o mês e o arquivo!');
-      return;
-    }
-
-    setUploading(true);
+  const loadReportData = async () => {
+    setLoading(true);
     try {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const content = e.target?.result as string;
-          const dados = JSON.parse(content);
-          
-          const response = await fetch(`${API_BASE}/api/admin/cardapio/import`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({
-              mes: uploadData.mes,
-              tipo: uploadData.tipo,
-              dados
-            })
-          });
+      const [reservasRes, trocasRes, portariaRes, rankingRes] = await Promise.all([
+        fetch(`${API_BASE}/api/reservas?from=${dateRange.from}&to=${dateRange.to}`, { credentials: 'include' }).catch(() => null),
+        fetch(`${API_BASE}/api/trocas-proteina?from=${dateRange.from}&to=${dateRange.to}`, { credentials: 'include' }).catch(() => null),
+        fetch(`${API_BASE}/api/portaria/agendamentos?from=${dateRange.from}&to=${dateRange.to}`, { credentials: 'include' }).catch(() => null),
+        fetch(`${API_BASE}/api/pontos/ranking`, { credentials: 'include' }).catch(() => null)
+      ]);
 
-          if (response.ok) {
-            toast.success('Cardápio importado com sucesso!');
-            setUploadData({ mes: '', tipo: 'padrao', arquivo: null });
-          } else {
-            toast.error('Erro ao importar cardápio');
-          }
-        } catch (error) {
-          toast.error('Erro no formato do arquivo JSON');
-        }
+      const newData = {
+        reservas: reservasRes?.ok ? (await reservasRes.json()).reservas || [] : [],
+        trocas: trocasRes?.ok ? (await trocasRes.json()).trocas || [] : [],
+        portaria: portariaRes?.ok ? (await portariaRes.json()).agendamentos || [] : [],
+        ranking: rankingRes?.ok ? (await rankingRes.json()).ranking || [] : []
       };
-      reader.readAsText(uploadData.arquivo);
+
+      setReportData(newData);
     } catch (error) {
-      toast.error('Erro ao importar cardápio');
+      console.error('Erro ao carregar dados dos relatórios:', error);
     } finally {
-      setUploading(false);
+      setLoading(false);
     }
   };
 
   const exportReport = async (tipo: string) => {
+    try {
+      toast.success(`Exportando relatório de ${tipo}...`);
+      
+      let url = '';
+      const params = new URLSearchParams();
+      if (dateRange.from) params.append('from', dateRange.from);
+      if (dateRange.to) params.append('to', dateRange.to);
+      
+      switch (tipo) {
+        case 'trocas':
+          url = `${API_BASE}/api/admin/export/trocas.csv?${params}`;
+          break;
+        case 'reservas':
+          url = `${API_BASE}/api/admin/export/reservas.csv?${params}`;
+          break;
+        case 'portaria':
+          url = `${API_BASE}/api/admin/export/portaria.csv?${params}`;
+          break;
+        case 'ranking':
+          url = `${API_BASE}/api/admin/export/ranking.csv`;
+          break;
+        default:
+          throw new Error('Tipo de relatório não suportado');
+      }
+
+      const response = await fetch(url, { credentials: 'include' });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const downloadUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = `relatorio-${tipo}-${dateRange.from}-${dateRange.to}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(downloadUrl);
+        
+        toast.success('Relatório baixado com sucesso!');
+      } else {
+        throw new Error('Erro ao gerar relatório');
+      }
+    } catch (error) {
+      console.error('Erro ao exportar:', error);
+      toast.error('Erro ao exportar relatório');
+    }
+  };
+
+  const getRecentActivity = () => {
+    const recent = [];
+    
+    // Add recent reservations
+    reportData.reservas.slice(0, 3).forEach(reserva => {
+      recent.push({
+        type: 'reserva',
+        title: `Reserva: ${reserva.sala}`,
+        description: `${reserva.assunto} - ${reserva.responsavel}`,
+        date: new Date(reserva.created_at),
+        color: 'bg-green-100 text-green-800'
+      });
+    });
+    
+    // Add recent protein exchanges
+    reportData.trocas.slice(0, 3).forEach(troca => {
+      recent.push({
+        type: 'troca',
+        title: `Troca de Proteína`,
+        description: `${troca.proteina_original} → ${troca.proteina_nova}`,
+        date: new Date(troca.created_at),
+        color: 'bg-yellow-100 text-yellow-800'
+      });
+    });
+    
+    // Add recent appointments
+    reportData.portaria.slice(0, 3).forEach(agendamento => {
+      recent.push({
+        type: 'portaria',
+        title: `Agendamento: ${agendamento.visitante}`,
+        description: `${agendamento.data} às ${agendamento.hora}`,
+        date: new Date(agendamento.created_at),
+        color: 'bg-blue-100 text-blue-800'
+      });
+    });
+    
+    return recent.sort((a, b) => b.date.getTime() - a.date.getTime()).slice(0, 10);
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xl font-semibold text-gray-900">Relatórios e Análises</h3>
+        <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700">De:</label>
+            <input
+              type="date"
+              value={dateRange.from}
+              onChange={(e) => setDateRange({...dateRange, from: e.target.value})}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <label className="text-sm font-medium text-gray-700">Até:</label>
+            <input
+              type="date"
+              value={dateRange.to}
+              onChange={(e) => setDateRange({...dateRange, to: e.target.value})}
+              className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Reservas</p>
+              <p className="text-3xl font-bold text-gray-900">{reportData.reservas.length}</p>
+            </div>
+            <Calendar className="w-8 h-8 text-green-500" />
+          </div>
+        </div>
+        
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Trocas de Proteína</p>
+              <p className="text-3xl font-bold text-gray-900">{reportData.trocas.length}</p>
+            </div>
+            <UtensilsCrossed className="w-8 h-8 text-yellow-500" />
+          </div>
+        </div>
+        
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Agendamentos</p>
+              <p className="text-3xl font-bold text-gray-900">{reportData.portaria.length}</p>
+            </div>
+            <FileText className="w-8 h-8 text-blue-500" />
+          </div>
+        </div>
+        
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600">Usuários no Ranking</p>
+              <p className="text-3xl font-bold text-gray-900">{reportData.ranking.length}</p>
+            </div>
+            <TrendingUp className="w-8 h-8 text-purple-500" />
+          </div>
+        </div>
+      </div>
+
+      {/* Export Section */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <h4 className="font-medium text-gray-900 mb-4">Exportar Relatórios</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <button
+            onClick={() => exportReport('reservas')}
+            className="p-4 border border-gray-200 rounded-lg hover:border-green-300 transition-colors text-left"
+          >
+            <Calendar className="w-6 h-6 text-green-600 mb-2" />
+            <h5 className="font-medium text-gray-900">Reservas de Salas</h5>
+            <p className="text-sm text-gray-600">{reportData.reservas.length} registros</p>
+          </button>
+
+          <button
+            onClick={() => exportReport('trocas')}
+            className="p-4 border border-gray-200 rounded-lg hover:border-yellow-300 transition-colors text-left"
+          >
+            <UtensilsCrossed className="w-6 h-6 text-yellow-600 mb-2" />
+            <h5 className="font-medium text-gray-900">Trocas de Proteína</h5>
+            <p className="text-sm text-gray-600">{reportData.trocas.length} registros</p>
+          </button>
+
+          <button
+            onClick={() => exportReport('portaria')}
+            className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors text-left"
+          >
+            <FileText className="w-6 h-6 text-blue-600 mb-2" />
+            <h5 className="font-medium text-gray-900">Agendamentos</h5>
+            <p className="text-sm text-gray-600">{reportData.portaria.length} registros</p>
+          </button>
+
+          <button
+            onClick={() => exportReport('ranking')}
+            className="p-4 border border-gray-200 rounded-lg hover:border-purple-300 transition-colors text-left"
+          >
+            <TrendingUp className="w-6 h-6 text-purple-600 mb-2" />
+            <h5 className="font-medium text-gray-900">Ranking Mensal</h5>
+            <p className="text-sm text-gray-600">{reportData.ranking.length} usuários</p>
+          </button>
+        </div>
+      </div>
+
+      {/* Recent Activity */}
+      <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+        <h4 className="font-medium text-gray-900 mb-4">Atividade Recente</h4>
+        {loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {getRecentActivity().map((activity, index) => (
+              <div key={index} className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${activity.color}`}>
+                  {activity.type}
+                </span>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">{activity.title}</p>
+                  <p className="text-sm text-gray-600">{activity.description}</p>
+                </div>
+                <span className="text-xs text-gray-500">
+                  {activity.date.toLocaleDateString('pt-BR')}
+                </span>
+              </div>
+            ))}
+            {getRecentActivity().length === 0 && (
+              <p className="text-gray-500 text-center py-4">Nenhuma atividade recente encontrada</p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
     try {
       toast.success(`Exportando relatório de ${tipo}...`);
       
