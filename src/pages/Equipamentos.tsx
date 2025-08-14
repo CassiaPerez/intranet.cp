@@ -19,9 +19,18 @@ interface EquipmentRequest {
   userEmail: string;
 }
 
-export const Equipamentos: React.FC = () => {
+// Hook seguro: não quebra se GamificationProvider não estiver montado
+function useGamificationSafe(): { addActivity?: (type: string, title: string, payload?: any) => void } {
+  try {
+    return useGamification() as any;
+  } catch {
+    return {};
+  }
+}
+
+const Equipamentos: React.FC = () => {
   const { user } = useAuth();
-  const { addActivity } = useGamification?.() ?? { addActivity: undefined as any };
+  const { addActivity } = useGamificationSafe();
 
   const [formData, setFormData] = useState({
     equipment: '',
@@ -35,10 +44,9 @@ export const Equipamentos: React.FC = () => {
 
   const isTI = useMemo(() => {
     const setor = (user as any)?.sector ?? (user as any)?.setor;
-    return String(setor || '').toUpperCase() === 'TI';
+    return String(setor || '').trim().toUpperCase() === 'TI';
   }, [user]);
 
-  // Mapas de UI
   const priorityColors: Record<Priority, string> = {
     low: 'bg-green-100 text-green-800',
     medium: 'bg-yellow-100 text-yellow-800',
@@ -73,11 +81,22 @@ export const Equipamentos: React.FC = () => {
 
   // Carrega lista ao mudar usuário/setor
   useEffect(() => {
-    // Espera o user carregar (evita chamadas com email vazio)
     if (!user) return;
     void loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isTI]);
+
+  const mapStatus = (raw: any): StatusFE => {
+    const v = String(raw ?? '').toLowerCase();
+    if (v === 'aprovado' || v === 'approved') return 'approved';
+    if (v === 'entregue' || v === 'delivered') return 'delivered';
+    return 'pending';
+  };
+
+  const mapPriority = (raw: any): Priority => {
+    const v = String(raw ?? '').toLowerCase();
+    return (v === 'low' || v === 'high' || v === 'medium') ? (v as Priority) : 'medium';
+  };
 
   const loadRequests = async () => {
     try {
@@ -85,13 +104,11 @@ export const Equipamentos: React.FC = () => {
       let url: string;
 
       if (isTI) {
-        // TI vê todas
-        url = `/api/ti/solicitacoes`;
+        url = `/api/ti/solicitacoes`; // TI vê todas
       } else {
         const email = encodeURIComponent(user?.email || '');
         if (!email) {
           setRequests([]);
-          setListLoading(false);
           return;
         }
         url = `/api/ti/minhas?email=${email}`;
@@ -107,32 +124,24 @@ export const Equipamentos: React.FC = () => {
       }
 
       const data = await response.json();
-      const rows = Array.isArray(data) ? data : (data.solicitacoes || []);
+      const rows: any[] = Array.isArray(data) ? data : (data.solicitacoes || []);
       const transformed: EquipmentRequest[] = rows.map((req: any) => {
-        const created = req.created_at ? new Date(req.created_at) : new Date();
-        const st: StatusFE =
-          req.status === 'pendente' ? 'pending' :
-          req.status === 'aprovado' ? 'approved' : 'delivered';
-
-        // prioridade vem do backend como low/medium/high; se vier vazio, 'medium'
-        const pr: Priority = (req.prioridade || 'medium') as Priority;
-
+        const created = req.created_at || req.createdAt || Date.now();
         return {
-          id: String(req.id),
-          equipment: req.titulo,
-          justification: req.descricao || '',
-          priority: pr,
-          status: st,
-          requestDate: created,
-          user: req.nome || user?.name || 'Usuário',
-          userEmail: (req.email || user?.email || '').toLowerCase(),
+          id: String(req.id ?? req.uuid ?? cryptoRandom()),
+          equipment: String(req.titulo ?? req.equipment ?? 'Equipamento'),
+          justification: String(req.descricao ?? req.justificativa ?? ''),
+          priority: mapPriority(req.prioridade ?? req.priority),
+          status: mapStatus(req.status),
+          requestDate: new Date(created),
+          user: String(req.nome ?? user?.name ?? 'Usuário'),
+          userEmail: String(req.email ?? user?.email ?? '').toLowerCase(),
         };
       });
 
-      // Usuário comum: por garantia, filtre por email
       const finalList = isTI
         ? transformed
-        : transformed.filter(r => r.userEmail && user?.email && r.userEmail === user.email.toLowerCase());
+        : transformed.filter(r => !!r.userEmail && !!user?.email && r.userEmail === user.email.toLowerCase());
 
       setRequests(finalList);
     } catch (err) {
@@ -151,8 +160,8 @@ export const Equipamentos: React.FC = () => {
       return;
     }
 
-    const equipmentName = formData.equipment === 'other' ? formData.customEquipment : formData.equipment;
-    if (!equipmentName || !formData.justification) {
+    const equipmentName = formData.equipment === 'other' ? formData.customEquipment.trim() : formData.equipment.trim();
+    if (!equipmentName || !formData.justification.trim()) {
       toast.error('Preencha todos os campos obrigatórios!');
       return;
     }
@@ -179,7 +188,7 @@ export const Equipamentos: React.FC = () => {
         return;
       }
 
-      // Gamificação (opcional)
+      // Gamificação (opcional, seguro)
       try {
         addActivity?.('equipment_request', `Solicitou equipamento: ${equipmentName}`, {
           equipment: equipmentName,
@@ -190,7 +199,6 @@ export const Equipamentos: React.FC = () => {
 
       toast.success('Solicitação enviada com sucesso! O setor de TI foi notificado.');
 
-      // Reset form e recarrega lista
       setFormData({ equipment: '', customEquipment: '', justification: '', priority: 'medium' });
       await loadRequests();
     } catch (error) {
@@ -201,7 +209,6 @@ export const Equipamentos: React.FC = () => {
     }
   };
 
-  // UI helpers
   const TitleRight = () => {
     if (isTI) return <div className="text-sm text-gray-600">{requests.length} solicitações totais</div>;
     return null;
@@ -221,9 +228,7 @@ export const Equipamentos: React.FC = () => {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Tipo de Equipamento
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-3">Tipo de Equipamento</label>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {equipmentTypes.map((equipment) => (
                   <button
@@ -245,9 +250,7 @@ export const Equipamentos: React.FC = () => {
 
             {formData.equipment === 'other' && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Especificar Equipamento
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Especificar Equipamento</label>
                 <input
                   type="text"
                   value={formData.customEquipment}
@@ -260,9 +263,7 @@ export const Equipamentos: React.FC = () => {
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Prioridade
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Prioridade</label>
               <select
                 value={formData.priority}
                 onChange={(e) => setFormData((p) => ({ ...p, priority: e.target.value as Priority }))}
@@ -275,9 +276,7 @@ export const Equipamentos: React.FC = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Justificativa
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Justificativa</label>
               <textarea
                 value={formData.justification}
                 onChange={(e) => setFormData((p) => ({ ...p, justification: e.target.value }))}
@@ -293,8 +292,8 @@ export const Equipamentos: React.FC = () => {
               disabled={
                 submitting ||
                 !formData.equipment ||
-                !formData.justification ||
-                (formData.equipment === 'other' && !formData.customEquipment)
+                !formData.justification.trim() ||
+                (formData.equipment === 'other' && !formData.customEquipment.trim())
               }
               aria-busy={submitting}
               className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 flex items-center justify-center space-x-2"
@@ -361,3 +360,13 @@ export const Equipamentos: React.FC = () => {
     </Layout>
   );
 };
+
+export default Equipamentos;
+
+/* =============== helpers =============== */
+
+function cryptoRandom() {
+  // fallback simples se não houver req.id
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return (crypto as any).randomUUID();
+  return Math.random().toString(36).slice(2);
+}
