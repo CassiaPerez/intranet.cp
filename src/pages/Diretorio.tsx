@@ -12,7 +12,8 @@ type Contato = {
   email?: string;
 };
 
-const JSON_PATH = '/diretorio/diretorio.json'; // coloque o arquivo em public/diretorio/diretorio.json
+// Usa o base path do Vite (funciona em dev e em produção mesmo em subpasta)
+const JSON_PATH = `${import.meta.env.BASE_URL}diretorio/diretorio.json`;
 
 const Diretorio: React.FC = () => {
   const [contatos, setContatos] = useState<Contato[]>([]);
@@ -28,8 +29,13 @@ const Diretorio: React.FC = () => {
     let alive = true;
     (async () => {
       try {
-        const res = await fetch(`${JSON_PATH}?v=${Date.now()}`, { cache: 'no-store' } as RequestInit);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const url = `${JSON_PATH}?v=${Date.now()}`;
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          console.error('Diretório: HTTP', res.status, res.statusText, 'URL:', url, 'Body:', body?.slice(0, 400));
+          throw new Error(`HTTP ${res.status}`);
+        }
         const text = await res.text();
         const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
         const data = JSON.parse(clean);
@@ -37,10 +43,7 @@ const Diretorio: React.FC = () => {
         // Aceita objeto com múltiplos arrays (representantes, equipe_apucarana_pr, etc.)
         const lista: any[] = Array.isArray(data)
           ? data
-          : Object.values(data).reduce((acc: any[], v: any) => {
-              if (Array.isArray(v)) acc.push(...v);
-              return acc;
-            }, []);
+          : Object.values(data).reduce((acc: any[], v: any) => (Array.isArray(v) ? acc.concat(v) : acc), []);
 
         if (alive) setContatos(normalize(lista));
       } catch (e: any) {
