@@ -19,15 +19,38 @@ interface EquipmentRequest {
   userEmail: string;
 }
 
-// Hook seguro: não quebra se GamificationProvider não estiver montado
-function useGamificationSafe(): { addActivity?: (type: string, title: string, payload?: any) => void } {
-  try {
-    return useGamification() as any;
-  } catch {
-    return {};
-  }
+// ========= Helpers =========
+function uid() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function formatDateBR(d: Date) {
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '—';
+  try { return new Intl.DateTimeFormat('pt-BR').format(d); } catch { return '—'; }
+}
+
+function useGamificationSafe(): { addActivity?: (type: string, title: string, payload?: any) => void } {
+  try { return useGamification() as any; } catch { return {}; }
+}
+
+const mapStatus = (raw: any): StatusFE => {
+  const v = String(raw ?? '').toLowerCase();
+  if (v === 'aprovado' || v === 'approved') return 'approved';
+  if (v === 'entregue' || v === 'delivered') return 'delivered';
+  return 'pending';
+};
+
+const mapPriority = (raw: any): Priority => {
+  const v = String(raw ?? '').toLowerCase();
+  return (v === 'low' || v === 'high' || v === 'medium') ? (v as Priority) : 'medium';
+};
+
+const toDate = (v: any) => {
+  const d = new Date(v || Date.now());
+  return isNaN(d.getTime()) ? new Date() : d;
+};
+
+// ========= Component =========
 const Equipamentos: React.FC = () => {
   const { user } = useAuth();
   const { addActivity } = useGamificationSafe();
@@ -79,24 +102,12 @@ const Equipamentos: React.FC = () => {
     { id: 'other', name: 'Outro', icon: Monitor },
   ];
 
-  // Carrega lista ao mudar usuário/setor
+  // Carrega lista quando usuário/setor disponíveis
   useEffect(() => {
     if (!user) return;
     void loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, isTI]);
-
-  const mapStatus = (raw: any): StatusFE => {
-    const v = String(raw ?? '').toLowerCase();
-    if (v === 'aprovado' || v === 'approved') return 'approved';
-    if (v === 'entregue' || v === 'delivered') return 'delivered';
-    return 'pending';
-  };
-
-  const mapPriority = (raw: any): Priority => {
-    const v = String(raw ?? '').toLowerCase();
-    return (v === 'low' || v === 'high' || v === 'medium') ? (v as Priority) : 'medium';
-  };
 
   const loadRequests = async () => {
     try {
@@ -125,19 +136,16 @@ const Equipamentos: React.FC = () => {
 
       const data = await response.json();
       const rows: any[] = Array.isArray(data) ? data : (data.solicitacoes || []);
-      const transformed: EquipmentRequest[] = rows.map((req: any) => {
-        const created = req.created_at || req.createdAt || Date.now();
-        return {
-          id: String(req.id ?? req.uuid ?? cryptoRandom()),
-          equipment: String(req.titulo ?? req.equipment ?? 'Equipamento'),
-          justification: String(req.descricao ?? req.justificativa ?? ''),
-          priority: mapPriority(req.prioridade ?? req.priority),
-          status: mapStatus(req.status),
-          requestDate: new Date(created),
-          user: String(req.nome ?? user?.name ?? 'Usuário'),
-          userEmail: String(req.email ?? user?.email ?? '').toLowerCase(),
-        };
-      });
+      const transformed: EquipmentRequest[] = rows.map((req: any) => ({
+        id: String(req.id ?? req.uuid ?? uid()),
+        equipment: String(req.titulo ?? req.equipment ?? 'Equipamento'),
+        justification: String(req.descricao ?? req.justificativa ?? ''),
+        priority: mapPriority(req.prioridade ?? req.priority),
+        status: mapStatus(req.status),
+        requestDate: toDate(req.created_at ?? req.createdAt),
+        user: String(req.nome ?? user?.name ?? 'Usuário'),
+        userEmail: String(req.email ?? user?.email ?? '').toLowerCase(),
+      }));
 
       const finalList = isTI
         ? transformed
@@ -188,7 +196,6 @@ const Equipamentos: React.FC = () => {
         return;
       }
 
-      // Gamificação (opcional, seguro)
       try {
         addActivity?.('equipment_request', `Solicitou equipamento: ${equipmentName}`, {
           equipment: equipmentName,
@@ -343,7 +350,7 @@ const Equipamentos: React.FC = () => {
                       <div className="flex items-center space-x-4 text-xs text-gray-500">
                         <span>Solicitado por: {request.user}</span>
                         <span>•</span>
-                        <span>{request.requestDate.toLocaleDateString('pt-BR')}</span>
+                        <span>{formatDateBR(request.requestDate)}</span>
                       </div>
                     </div>
 
@@ -362,11 +369,4 @@ const Equipamentos: React.FC = () => {
 };
 
 export default Equipamentos;
-
-/* =============== helpers =============== */
-
-function cryptoRandom() {
-  // fallback simples se não houver req.id
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return (crypto as any).randomUUID();
-  return Math.random().toString(36).slice(2);
-}
+export { Equipamentos };
