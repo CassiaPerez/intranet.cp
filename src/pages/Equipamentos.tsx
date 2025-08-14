@@ -1,16 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Layout } from '../components/Layout';
 import { Monitor, Smartphone, Mouse, Keyboard, Headphones, Printer, Send, CheckCircle } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { useGamification } from '../contexts/GamificationContext';
 
+type Priority = 'low' | 'medium' | 'high';
+type StatusFE = 'pending' | 'approved' | 'delivered';
+
 interface EquipmentRequest {
   id: string;
   equipment: string;
   justification: string;
-  priority: 'low' | 'medium' | 'high';
-  status: 'pending' | 'approved' | 'delivered';
+  priority: Priority;
+  status: StatusFE;
   requestDate: Date;
   user: string;
   userEmail: string;
@@ -18,43 +21,43 @@ interface EquipmentRequest {
 
 export const Equipamentos: React.FC = () => {
   const { user } = useAuth();
-  const { addActivity } = useGamification();
+  const { addActivity } = useGamification?.() ?? { addActivity: undefined as any };
+
   const [formData, setFormData] = useState({
     equipment: '',
     customEquipment: '',
     justification: '',
-    priority: 'medium' as 'low' | 'medium' | 'high',
+    priority: 'medium' as Priority,
   });
-  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
   const [requests, setRequests] = useState<EquipmentRequest[]>([]);
 
-  useEffect(() => {
-    loadRequests();
-  }, []);
+  const isTI = useMemo(() => {
+    const setor = (user as any)?.sector ?? (user as any)?.setor;
+    return String(setor || '').toUpperCase() === 'TI';
+  }, [user]);
 
-  const loadRequests = async () => {
-    try {
-      const response = await fetch('/api/ti/minhas', {
-        credentials: 'include'
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Transform backend data to frontend format
-        const transformedRequests = (data.solicitacoes || []).map((req: any) => ({
-          id: req.id.toString(),
-          equipment: req.titulo,
-          justification: req.descricao || '',
-          priority: 'medium' as const,
-          status: req.status === 'pendente' ? 'pending' : req.status === 'aprovado' ? 'approved' : 'delivered',
-          requestDate: new Date(req.created_at),
-          user: user?.name || 'Usuário',
-          userEmail: user?.email || '',
-        }));
-        setRequests(transformedRequests);
-      }
-    } catch (error) {
-      console.error('Erro ao carregar solicitações:', error);
-    }
+  // Mapas de UI
+  const priorityColors: Record<Priority, string> = {
+    low: 'bg-green-100 text-green-800',
+    medium: 'bg-yellow-100 text-yellow-800',
+    high: 'bg-red-100 text-red-800',
+  };
+  const statusColors: Record<StatusFE, string> = {
+    pending: 'bg-yellow-100 text-yellow-800',
+    approved: 'bg-blue-100 text-blue-800',
+    delivered: 'bg-green-100 text-green-800',
+  };
+  const priorityLabels: Record<Priority, string> = {
+    low: 'Baixa',
+    medium: 'Média',
+    high: 'Alta',
+  };
+  const statusLabels: Record<StatusFE, string> = {
+    pending: 'Pendente',
+    approved: 'Aprovado',
+    delivered: 'Entregue',
   };
 
   const equipmentTypes = [
@@ -68,105 +71,154 @@ export const Equipamentos: React.FC = () => {
     { id: 'other', name: 'Outro', icon: Monitor },
   ];
 
-  const priorityColors = {
-    low: 'bg-green-100 text-green-800',
-    medium: 'bg-yellow-100 text-yellow-800',
-    high: 'bg-red-100 text-red-800',
-  };
+  // Carrega lista ao mudar usuário/setor
+  useEffect(() => {
+    // Espera o user carregar (evita chamadas com email vazio)
+    if (!user) return;
+    void loadRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isTI]);
 
-  const statusColors = {
-    pending: 'bg-yellow-100 text-yellow-800',
-    approved: 'bg-blue-100 text-blue-800',
-    delivered: 'bg-green-100 text-green-800',
-  };
+  const loadRequests = async () => {
+    try {
+      setListLoading(true);
+      let url: string;
 
-  const priorityLabels = {
-    low: 'Baixa',
-    medium: 'Média',
-    high: 'Alta',
-  };
+      if (isTI) {
+        // TI vê todas
+        url = `/api/ti/solicitacoes`;
+      } else {
+        const email = encodeURIComponent(user?.email || '');
+        if (!email) {
+          setRequests([]);
+          setListLoading(false);
+          return;
+        }
+        url = `/api/ti/minhas?email=${email}`;
+      }
 
-  const statusLabels = {
-    pending: 'Pendente',
-    approved: 'Aprovado',
-    delivered: 'Entregue',
+      const response = await fetch(url, { credentials: 'include' });
+      if (!response.ok) {
+        const txt = await response.text();
+        console.error('Falha ao carregar solicitações:', response.status, txt);
+        toast.error('Erro ao carregar solicitações');
+        setRequests([]);
+        return;
+      }
+
+      const data = await response.json();
+      const rows = Array.isArray(data) ? data : (data.solicitacoes || []);
+      const transformed: EquipmentRequest[] = rows.map((req: any) => {
+        const created = req.created_at ? new Date(req.created_at) : new Date();
+        const st: StatusFE =
+          req.status === 'pendente' ? 'pending' :
+          req.status === 'aprovado' ? 'approved' : 'delivered';
+
+        // prioridade vem do backend como low/medium/high; se vier vazio, 'medium'
+        const pr: Priority = (req.prioridade || 'medium') as Priority;
+
+        return {
+          id: String(req.id),
+          equipment: req.titulo,
+          justification: req.descricao || '',
+          priority: pr,
+          status: st,
+          requestDate: created,
+          user: req.nome || user?.name || 'Usuário',
+          userEmail: (req.email || user?.email || '').toLowerCase(),
+        };
+      });
+
+      // Usuário comum: por garantia, filtre por email
+      const finalList = isTI
+        ? transformed
+        : transformed.filter(r => r.userEmail && user?.email && r.userEmail === user.email.toLowerCase());
+
+      setRequests(finalList);
+    } catch (err) {
+      console.error('Erro ao carregar solicitações:', err);
+      toast.error('Erro ao carregar solicitações');
+      setRequests([]);
+    } finally {
+      setListLoading(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
+    if (!user?.email) {
+      toast.error('Você precisa estar logado para solicitar.');
+      return;
+    }
 
+    const equipmentName = formData.equipment === 'other' ? formData.customEquipment : formData.equipment;
+    if (!equipmentName || !formData.justification) {
+      toast.error('Preencha todos os campos obrigatórios!');
+      return;
+    }
+
+    setSubmitting(true);
     try {
-      const equipmentName = formData.equipment === 'other' ? formData.customEquipment : formData.equipment;
-      
-      if (!equipmentName || !formData.justification) {
-        toast.error('Preencha todos os campos obrigatórios!');
-        return;
-      }
-
-      // Send to backend API
-      const response = await fetch('/api/ti/solicitacoes', {
+      const res = await fetch('/api/ti/solicitacoes', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           titulo: equipmentName,
           descricao: `Prioridade: ${formData.priority}\nJustificativa: ${formData.justification}`,
+          prioridade: formData.priority,
+          email: user.email,
+          nome: (user as any)?.name || (user as any)?.nome || '',
         }),
       });
 
-      if (response.ok) {
-        await loadRequests(); // Reload requests
-        
-        // Add gamification activity
-        addActivity('equipment_request', `Solicitou equipamento: ${equipmentName}`, {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error('POST /api/ti/solicitacoes falhou:', res.status, err);
+        toast.error(err.error || 'Erro ao enviar solicitação');
+        return;
+      }
+
+      // Gamificação (opcional)
+      try {
+        addActivity?.('equipment_request', `Solicitou equipamento: ${equipmentName}`, {
           equipment: equipmentName,
           priority: formData.priority,
           justification: formData.justification,
         });
-      
-        toast.success('Solicitação enviada com sucesso! O setor de TI foi notificado.');
+      } catch {}
 
-        // Reset form
-        setFormData({
-          equipment: '',
-          customEquipment: '',
-          justification: '',
-          priority: 'medium',
-        });
-      } else {
-        const errorData = await response.json();
-        toast.error(errorData.error || 'Erro ao enviar solicitação');
-      }
+      toast.success('Solicitação enviada com sucesso! O setor de TI foi notificado.');
+
+      // Reset form e recarrega lista
+      setFormData({ equipment: '', customEquipment: '', justification: '', priority: 'medium' });
+      await loadRequests();
     } catch (error) {
       console.error('Erro ao enviar solicitação:', error);
-      toast.error('Erro ao enviar solicitação!');
+      toast.error('Erro ao enviar solicitação');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const userRequests = requests.filter(req => req.userEmail === (user as any)?.email);
-  const allRequests = ((user as any)?.sector || (user as any)?.setor) === 'TI' ? requests : userRequests;
+  // UI helpers
+  const TitleRight = () => {
+    if (isTI) return <div className="text-sm text-gray-600">{requests.length} solicitações totais</div>;
+    return null;
+  };
 
   return (
     <Layout>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Equipamentos de TI</h1>
-          {user?.sector === 'TI' && (
-            <div className="text-sm text-gray-600">
-              {requests.length} solicitações totais
-            </div>
-          )}
+          <TitleRight />
         </div>
 
-        {/* Request Form */}
+        {/* Formulário */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Nova Solicitação</h2>
-          
+
           <form onSubmit={handleSubmit} className="space-y-6">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-3">
@@ -177,7 +229,7 @@ export const Equipamentos: React.FC = () => {
                   <button
                     key={equipment.id}
                     type="button"
-                    onClick={() => setFormData({ ...formData, equipment: equipment.id })}
+                    onClick={() => setFormData((p) => ({ ...p, equipment: equipment.id }))}
                     className={`p-4 border rounded-lg text-center transition-colors ${
                       formData.equipment === equipment.id
                         ? 'border-blue-500 bg-blue-50 text-blue-700'
@@ -199,7 +251,7 @@ export const Equipamentos: React.FC = () => {
                 <input
                   type="text"
                   value={formData.customEquipment}
-                  onChange={(e) => setFormData({ ...formData, customEquipment: e.target.value })}
+                  onChange={(e) => setFormData((p) => ({ ...p, customEquipment: e.target.value }))}
                   placeholder="Descreva o equipamento necessário"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   required
@@ -213,7 +265,7 @@ export const Equipamentos: React.FC = () => {
               </label>
               <select
                 value={formData.priority}
-                onChange={(e) => setFormData({ ...formData, priority: e.target.value as 'low' | 'medium' | 'high' })}
+                onChange={(e) => setFormData((p) => ({ ...p, priority: e.target.value as Priority }))}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               >
                 <option value="low">Baixa</option>
@@ -228,7 +280,7 @@ export const Equipamentos: React.FC = () => {
               </label>
               <textarea
                 value={formData.justification}
-                onChange={(e) => setFormData({ ...formData, justification: e.target.value })}
+                onChange={(e) => setFormData((p) => ({ ...p, justification: e.target.value }))}
                 placeholder="Explique por que você precisa deste equipamento..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 rows={4}
@@ -238,30 +290,41 @@ export const Equipamentos: React.FC = () => {
 
             <button
               type="submit"
-              disabled={loading || !formData.equipment || !formData.justification}
+              disabled={
+                submitting ||
+                !formData.equipment ||
+                !formData.justification ||
+                (formData.equipment === 'other' && !formData.customEquipment)
+              }
+              aria-busy={submitting}
               className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium disabled:opacity-50 flex items-center justify-center space-x-2"
             >
               <Send className="w-4 h-4" />
-              <span>{loading ? 'Enviando...' : 'Enviar Solicitação'}</span>
+              <span>{submitting ? 'Enviando...' : 'Enviar Solicitação'}</span>
             </button>
           </form>
         </div>
 
-        {/* Requests List */}
+        {/* Lista */}
         <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">
-            {user?.sector === 'TI' ? 'Todas as Solicitações' : 'Minhas Solicitações'}
+            {isTI ? 'Todas as Solicitações' : 'Minhas Solicitações'}
           </h2>
 
-          {allRequests.length === 0 ? (
+          {listLoading ? (
+            <div className="text-center py-12 text-gray-500">Carregando...</div>
+          ) : requests.length === 0 ? (
             <div className="text-center py-8">
               <Monitor className="w-12 h-12 text-gray-400 mx-auto mb-4" />
               <p className="text-gray-600">Nenhuma solicitação encontrada</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {allRequests.map((request) => (
-                <div key={request.id} className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors">
+              {requests.map((request) => (
+                <div
+                  key={request.id}
+                  className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 transition-colors"
+                >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-2">
@@ -273,16 +336,18 @@ export const Equipamentos: React.FC = () => {
                           {statusLabels[request.status]}
                         </span>
                       </div>
-                      
-                      <p className="text-sm text-gray-600 mb-3">{request.justification}</p>
-                      
+
+                      <p className="text-sm text-gray-600 whitespace-pre-wrap mb-3">
+                        {request.justification}
+                      </p>
+
                       <div className="flex items-center space-x-4 text-xs text-gray-500">
                         <span>Solicitado por: {request.user}</span>
                         <span>•</span>
                         <span>{request.requestDate.toLocaleDateString('pt-BR')}</span>
                       </div>
                     </div>
-                    
+
                     {request.status === 'delivered' && (
                       <CheckCircle className="w-6 h-6 text-green-500 flex-shrink-0" />
                     )}
