@@ -31,13 +31,21 @@ const Diretorio: React.FC = () => {
       try {
         const url = `${JSON_PATH}?v=${Date.now()}`;
         const res = await fetch(url, { cache: 'no-store' });
+
+        const bodyText = await res.text().catch(() => '');
         if (!res.ok) {
-          const body = await res.text().catch(() => '');
-          console.error('Diretório: HTTP', res.status, res.statusText, 'URL:', url, 'Body:', body?.slice(0, 400));
+          console.error('[Diretório] HTTP', res.status, res.statusText, 'URL:', url, 'Body:', bodyText.slice(0, 400));
           throw new Error(`HTTP ${res.status}`);
         }
-        const text = await res.text();
-        const clean = text.replace(/^\uFEFF/, ''); // remove BOM se houver
+
+        // Se content-type não indica JSON e o conteúdo começa com "<", é HTML (fallback da SPA)
+        const ct = res.headers.get('content-type') || '';
+        if (!/application\/json|text\/json/i.test(ct) && bodyText.trim().startsWith('<')) {
+          console.error('[Diretório] Recebi HTML no lugar de JSON. Verifique se public/diretorio/diretorio.json existe. URL:', url);
+          throw new Error('Resposta não é JSON (provável fallback de SPA).');
+        }
+
+        const clean = bodyText.replace(/^\uFEFF/, ''); // remove BOM se houver
         const data = JSON.parse(clean);
 
         // Aceita objeto com múltiplos arrays (representantes, equipe_apucarana_pr, etc.)
@@ -46,7 +54,7 @@ const Diretorio: React.FC = () => {
           : Object.values(data).reduce((acc: any[], v: any) => (Array.isArray(v) ? acc.concat(v) : acc), []);
 
         if (alive) setContatos(normalize(lista));
-      } catch (e: any) {
+      } catch (e) {
         console.error('Falha ao carregar diretório:', e);
         if (alive) {
           setErro('Não foi possível carregar o diretório.');
