@@ -94,10 +94,11 @@ async function cleanDemo() {
 
     const confirmacao = await question('❓ Tem certeza que deseja continuar? (digite "CONFIRMAR" para prosseguir): ');
     
-    if (confirmacao !== 'CONFIRMAR') {
+    if (confirmacao.toUpperCase() !== 'CONFIRMAR') {
       console.log('❌ Operação cancelada pelo usuário.');
-      db.close();
       rl.close();
+      db.close();
+      process.exit(0);
       return;
     }
 
@@ -155,10 +156,14 @@ async function cleanDemo() {
 
   } catch (error) {
     console.error('❌ Erro durante a limpeza:', error);
-  } finally {
-    db.close();
     rl.close();
+    db.close();
+    process.exit(1);
   }
+
+  rl.close();
+  db.close();
+  process.exit(0);
 }
 
 if (require.main === module) {
