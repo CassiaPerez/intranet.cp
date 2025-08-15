@@ -49,18 +49,12 @@ if (fs.existsSync(DB_PATH)) {
 process.on('uncaughtException', (error) => {
   console.error('[SERVER] ❌ Uncaught Exception:', error.message);
   console.error('[SERVER] Stack:', error.stack);
-  // Don't exit in development
-  if (process.env.NODE_ENV !== 'development') {
-    process.exit(1);
-  }
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[SERVER] ❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  // Don't exit in development
-  if (process.env.NODE_ENV !== 'development') {
-    process.exit(1);
-  }
+  process.exit(1);
 });
 
 // Database setup
