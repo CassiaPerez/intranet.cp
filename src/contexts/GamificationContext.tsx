@@ -166,56 +166,6 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
 
   // Initialize with mock data
   useEffect(() => {
-    const mockStats: UserStats[] = [
-      {
-        userId: '1',
-        userName: 'Maria Santos',
-        userSector: 'RH',
-        userAvatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=150',
-        totalPoints: 1450,
-        level: 6,
-        activities: [],
-        badges: ['Comunicador', 'Ativo', 'Veterano', 'Sociável'],
-        streak: 12,
-        lastActivity: new Date('2025-01-15T14:30:00'),
-      },
-      {
-        userId: '2',
-        userName: 'João Silva',
-        userSector: 'Financeiro',
-        userAvatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150',
-        totalPoints: 1250,
-        level: 5,
-        activities: [],
-        badges: ['Organizador', 'Ativo', 'Engajado'],
-        streak: 8,
-        lastActivity: new Date('2025-01-15T10:15:00'),
-      },
-      {
-        userId: '3',
-        userName: 'Carlos Oliveira',
-        userSector: 'TI',
-        userAvatar: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?w=150',
-        totalPoints: 980,
-        level: 4,
-        activities: [],
-        badges: ['Gourmet', 'Consistente'],
-        streak: 15,
-        lastActivity: new Date('2025-01-15T16:45:00'),
-      },
-      {
-        userId: '4',
-        userName: 'Ana Costa',
-        userSector: 'Vendas',
-        userAvatar: 'https://images.pexels.com/photos/1130626/pexels-photo-1130626.jpeg?w=150',
-        totalPoints: 750,
-        level: 3,
-        activities: [],
-        badges: ['Sociável'],
-        streak: 5,
-        lastActivity: new Date('2025-01-15T09:20:00'),
-      },
-    ];
 
     // Load from localStorage or use mock data
     const savedStats = localStorage.getItem('gamification_stats');
@@ -223,8 +173,8 @@ export const GamificationProvider: React.FC<GamificationProviderProps> = ({ chil
       const parsedStats = JSON.parse(savedStats);
       setAllUsersStats(parsedStats);
     } else {
-      setAllUsersStats(mockStats);
-      localStorage.setItem('gamification_stats', JSON.stringify(mockStats));
+      setAllUsersStats([]);
+      localStorage.setItem('gamification_stats', JSON.stringify([]));
     }
   }, []);
 

@@ -40,11 +40,7 @@ export const Dashboard: React.FC = () => {
         ]
       });
       
-      setRanking([
-        { nome: 'Maria Santos', foto: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=150', total_pontos: 1450 },
-        { nome: 'João Silva', foto: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150', total_pontos: 1250 },
-        { nome: 'Carlos Oliveira', foto: 'https://images.pexels.com/photos/1222271/pexels-photo-1222271.jpeg?w=150', total_pontos: 980 }
-      ]);
+      setRanking([]);
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
       // Use fallback data instead of showing error
