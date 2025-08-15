@@ -48,7 +48,7 @@ export const Mural: React.FC = () => {
     try {
       setLoading(true);
       console.log('[MURAL] Loading posts...');
-      const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
+      const response = await fetch(`${API_BASE}/api/mural/posts`, {
         credentials: 'include'
       });
 
