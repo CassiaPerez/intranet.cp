@@ -82,11 +82,11 @@ const createDemoUsers = () => {
     console.log('[DEMO] 🔄 Creating demo users...');
     
     const users = [
-      { id: 'super-admin', username: 'admin', nome: 'Super Admin', email: null, senha: 'admin', setor: 'TI', role: 'admin' },
+      { id: 'super-admin', username: 'admin', nome: 'Super Admin', email: 'superadmin@grupocropfield.com.br', senha: 'admin', setor: 'TI', role: 'admin' },
       { id: 'admin-1', username: 'administrador', nome: 'Administrador', email: 'admin@grupocropfield.com.br', senha: 'admin123', setor: 'TI', role: 'admin' },
       { id: 'rh-1', username: 'rh', nome: 'RH Manager', email: 'rh@grupocropfield.com.br', senha: 'rh123', setor: 'RH', role: 'rh' },
       { id: 'user-1', username: 'usuario', nome: 'Usuário Teste', email: 'user@grupocropfield.com.br', senha: 'user123', setor: 'Geral', role: 'colaborador' },
-      { id: 'user-2', username: 'user', nome: 'Usuário', email: null, senha: 'user', setor: 'Geral', role: 'colaborador' },
+      { id: 'user-2', username: 'user', nome: 'Usuário', email: 'user2@grupocropfield.com.br', senha: 'user', setor: 'Geral', role: 'colaborador' },
     ];
     
     let processed = 0;
