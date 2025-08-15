@@ -206,7 +206,7 @@ const initializeDatabase = () => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] ❌ Error creating mural_likes table:', err.message);
+      console.error('[DB] Error creating mural_likes table:', err);
     } else {
       console.log('[DB] ✅ mural_likes table ready');
       tables.push('mural_likes');
@@ -227,7 +227,7 @@ const initializeDatabase = () => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] ❌ Error creating mural_comments table:', err.message);
+      console.error('[DB] Error creating mural_comments table:', err);
     } else {
       console.log('[DB] ✅ mural_comments table ready');
       tables.push('mural_comments');
@@ -251,7 +251,7 @@ const initializeDatabase = () => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] ❌ Error creating reservas table:', err.message);
+      console.error('[DB] Error creating reservas table:', err);
     } else {
       console.log('[DB] ✅ reservas table ready');
       tables.push('reservas');
@@ -274,7 +274,7 @@ const initializeDatabase = () => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] ❌ Error creating ti_solicitacoes table:', err.message);
+      console.error('[DB] Error creating ti_solicitacoes table:', err);
     } else {
       console.log('[DB] ✅ ti_solicitacoes table ready');
       tables.push('ti_solicitacoes');
@@ -295,7 +295,7 @@ const initializeDatabase = () => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] ❌ Error creating trocas_proteina table:', err.message);
+      console.error('[DB] Error creating trocas_proteina table:', err);
     } else {
       console.log('[DB] ✅ trocas_proteina table ready');
       tables.push('trocas_proteina');
@@ -318,16 +318,20 @@ const initializeDatabase = () => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] ❌ Error creating portaria_agendamentos table:', err.message);
+      console.error('[DB] Error creating portaria_agendamentos table:', err);
     } else {
       console.log('[DB] ✅ portaria_agendamentos table ready');
       tables.push('portaria_agendamentos');
       checkAllTablesReady();
+      // Create demo users after all tables are ready
+      setTimeout(() => {
+        createDemoUsers();
+      }, 500);
     }
   });
-};
   
-console.log('[SERVER] Database tables setup initiated');
+  console.log('[SERVER] Database tables setup initiated');
+};
 
 // Middleware
 app.use(morgan('combined'));
