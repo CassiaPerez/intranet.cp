@@ -444,6 +444,33 @@ async function getUserMiddleware(req, res, next) {
 }
 
 // -------------------------------------------------------------
+// ======================
+// MURAL DEBUG ENDPOINT
+// ======================
+app.get('/api/mural/debug/env', (req, res) => {
+  try {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM mural_posts WHERE ativo = 1');
+    const result = stmt.get();
+    const totalPosts = result?.count || 0;
+    
+    res.json({
+      port: PORT,
+      database_path: DB_PATH,
+      total_posts: totalPosts,
+      demo_mode: DEMO_MODE,
+      user_id: req.user?.id || null,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('[MURAL-DEBUG] Database error:', error);
+    res.status(500).json({ 
+      error: 'Database error', 
+      details: error.message,
+      database_path: DB_PATH 
+    });
+  }
+});
+
 // Auth routes
 // -------------------------------------------------------------
 app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
