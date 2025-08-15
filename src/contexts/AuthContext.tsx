@@ -44,6 +44,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   }, []);
 
   const checkAuth = async () => {
+    setLoading(true);
     try {
       // Check if user is stored in localStorage first
       const storedUser = localStorage.getItem('currentUser');
@@ -70,11 +71,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               }
             }
             console.log('User data normalized:', userData);
+            setUser(userData);
+            setIsAuthenticated(true);
+            setLoading(false);
+            return;
           }
-          setUser(userData);
-          setIsAuthenticated(true);
-          return;
         } catch (error) {
+          console.error('Error parsing stored user:', error);
           localStorage.removeItem('currentUser');
         }
       }
@@ -93,12 +96,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               // Normalize API user data
               if (data.user) {
                 if (data.user.sector && !data.user.setor) {
-          // Store user data with token
-          if (data.user) {
-            localStorage.setItem('currentUser', JSON.stringify(data.user));
-            console.log('API user logged in:', data.user);
-          }
-          
                   data.user.setor = data.user.sector;
                 }
                 if (data.user.setor && !data.user.sector) {
@@ -118,11 +115,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                   data.user.token = data.token;
                 }
                 console.log('API user data normalized:', data.user);
+                setUser(data.user);
+                setIsAuthenticated(true);
+                localStorage.setItem('currentUser', JSON.stringify(data.user));
+                setLoading(false);
+                return;
               }
-              setUser(data.user);
-              setIsAuthenticated(true);
-              localStorage.setItem('currentUser', JSON.stringify(data.user));
-              return;
             } catch (parseError) {
               console.error('Failed to parse auth response:', parseError);
             }
