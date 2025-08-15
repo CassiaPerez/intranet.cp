@@ -12,6 +12,39 @@ const app = express();
 const PORT = 3005;
 const JWT_SECRET = 'your-secret-key-change-in-production';
 
+// Database path setup
+const DB_PATH = path.join(__dirname, 'data', 'database.sqlite');
+console.log('[SERVER] Database path:', DB_PATH);
+
+// Ensure data directory exists
+const dataDir = path.dirname(DB_PATH);
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  console.log('[SERVER] Created data directory:', dataDir);
+}
+
+// Check if database file exists but is empty/corrupted - force re-initialization
+if (fs.existsSync(DB_PATH)) {
+  try {
+    const stats = fs.statSync(DB_PATH);
+    if (stats.size === 0) {
+      console.log('[SERVER] ⚠️ Empty database file detected, removing for re-initialization...');
+      fs.unlinkSync(DB_PATH);
+    } else {
+      console.log('[SERVER] Database file exists:', stats.size, 'bytes');
+    }
+  } catch (error) {
+    console.log('[SERVER] ⚠️ Error checking database file, removing for re-initialization...', error.message);
+    try {
+      fs.unlinkSync(DB_PATH);
+    } catch (deleteError) {
+      console.error('[SERVER] ❌ Failed to delete corrupted database:', deleteError.message);
+    }
+  }
+} else {
+  console.log('[SERVER] Database file does not exist, will be created');
+}
+
 // Add process error handlers to prevent crashes
 process.on('uncaughtException', (error) => {
   console.error('[SERVER] ❌ Uncaught Exception:', error.message);
@@ -31,31 +64,13 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Database setup
-const DB_PATH = path.join(__dirname, 'data', 'database.sqlite');
-console.log('[SERVER] Database path:', DB_PATH);
-console.log('[SERVER] Database exists:', fs.existsSync(DB_PATH));
-
-// Ensure data directory exists
-const dataDir = path.dirname(DB_PATH);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-  console.log('[SERVER] Created data directory:', dataDir);
-}
-
 // Initialize database
 const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
   if (err) {
     console.error('[SERVER] ❌ Database connection error:', err.message);
     console.error('[SERVER] Database path:', DB_PATH);
-    console.error('[SERVER] Attempting to create database...');
-    
-    // Try to create the database file if it doesn't exist
-    try {
-      fs.writeFileSync(DB_PATH, '');
-      console.log('[SERVER] ✅ Database file created');
-    } catch (createError) {
-      console.error('[SERVER] ❌ Failed to create database file:', createError.message);
-    }
+    console.error('[SERVER] ❌ Database connection failed, exiting...');
+    process.exit(1);
   } else {
     console.log('[SERVER] ✅ Connected to SQLite database');
   }
@@ -76,52 +91,67 @@ const createDemoUsers = () => {
     
     let processed = 0;
     
-    // Check if database is ready
-    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'", (err, row) => {
-      if (err) {
-        console.error('[DEMO] ❌ Database not ready:', err.message);
-        resolve(false);
-        return;
-      }
-      
-      if (!row) {
-        console.log('[DEMO] ⏳ Waiting for usuarios table to be created...');
-        setTimeout(() => createDemoUsers().then(resolve), 1000);
-        return;
-      }
-      
-      console.log('[DEMO] ✅ Database is ready, creating users...');
-      
-    users.forEach((user) => {
-      const hashedPassword = bcrypt.hashSync(user.senha, 10);
-      
-      db.run(
-        `INSERT OR REPLACE INTO usuarios (id, username, nome, email, senha, setor, role, ativo)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
-        [user.id, user.username, user.nome, user.email, hashedPassword, user.setor, user.role],
-        function(err) {
-          if (err) {
-            console.error(`[DEMO] ❌ Error creating user ${user.username}:`, err.message);
+    // Check if database tables are ready with retries
+    const checkAndCreateUsers = (retries = 10) => {
+      db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'", (err, row) => {
+        if (err) {
+          console.error('[DEMO] ❌ Database error:', err.message);
+          if (retries > 0) {
+            console.log(`[DEMO] ⏳ Retrying in 1 second... (${retries} retries left)`);
+            setTimeout(() => checkAndCreateUsers(retries - 1), 1000);
           } else {
-            console.log(`[DEMO] ✅ User created: ${user.username} (${user.nome}) - Role: ${user.role}`);
+            console.error('[DEMO] ❌ Failed to initialize users after retries');
+            resolve(false);
           }
-          
-          processed++;
-          if (processed === users.length) {
-            console.log('[DEMO] All demo users processed');
-            
-            // Verify users were created
-            db.all('SELECT username, nome, role FROM usuarios WHERE ativo = 1', (verifyErr, rows) => {
-              if (!verifyErr && rows) {
-                console.log(`[DEMO] ✅ Verification: ${rows.length} active users in database`);
-              }
-              resolve(true);
-            });
-          }
+          return;
         }
-      );
-    });
-    });
+        
+        if (!row) {
+          if (retries > 0) {
+            console.log(`[DEMO] ⏳ Table not ready, waiting... (${retries} retries left)`);
+            setTimeout(() => checkAndCreateUsers(retries - 1), 1000);
+          } else {
+            console.error('[DEMO] ❌ usuarios table not created after retries');
+            resolve(false);
+          }
+          return;
+        }
+        
+        console.log('[DEMO] ✅ Database is ready, creating users...');
+        
+        users.forEach((user) => {
+          const hashedPassword = bcrypt.hashSync(user.senha, 10);
+          
+          db.run(
+            `INSERT OR REPLACE INTO usuarios (id, username, nome, email, senha, setor, role, ativo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+            [user.id, user.username, user.nome, user.email, hashedPassword, user.setor, user.role],
+            function(err) {
+              if (err) {
+                console.error(`[DEMO] ❌ Error creating user ${user.username}:`, err.message);
+              } else {
+                console.log(`[DEMO] ✅ User created: ${user.username} (${user.nome}) - Role: ${user.role}`);
+              }
+              
+              processed++;
+              if (processed === users.length) {
+                console.log('[DEMO] All demo users processed');
+                
+                // Verify users were created
+                db.all('SELECT username, nome, role FROM usuarios WHERE ativo = 1', (verifyErr, rows) => {
+                  if (!verifyErr && rows) {
+                    console.log(`[DEMO] ✅ Verification: ${rows.length} active users in database`);
+                  }
+                  resolve(true);
+                });
+              }
+            }
+          );
+        });
+      });
+    };
+    
+    checkAndCreateUsers();
   });
 };
 
@@ -159,13 +189,13 @@ const initializeDatabase = () => {
   const checkAllTablesReady = () => {
     if (tables.length === expectedTables) {
       console.log('[DB] ✅ All tables created, initializing demo users...');
-      setTimeout(() => {
-        createDemoUsers().then((success) => {
-          if (success) {
-            console.log('[DB] ✅ Database initialization complete');
-          }
-        });
-      }, 500);
+      createDemoUsers().then((success) => {
+        if (success) {
+          console.log('[DB] ✅ Database initialization complete');
+        } else {
+          console.error('[DB] ❌ Failed to initialize demo users');
+        }
+      });
     }
   };
 
