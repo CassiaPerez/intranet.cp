@@ -33,8 +33,50 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
   }
 });
 
+// Function to create demo users
+const createDemoUsers = () => {
+  return new Promise((resolve) => {
+    console.log('[DEMO] Creating demo users...');
+    
+    const users = [
+      { id: 'super-admin', nome: 'Super Admin', email: 'admin', senha: 'admin', setor: 'TI', role: 'admin' },
+      { id: 'admin-1', nome: 'Administrador', email: 'admin@grupocropfield.com.br', senha: 'admin123', setor: 'TI', role: 'admin' },
+      { id: 'rh-1', nome: 'RH Manager', email: 'rh@grupocropfield.com.br', senha: 'rh123', setor: 'RH', role: 'rh' },
+      { id: 'user-1', nome: 'Usuário Teste', email: 'user@grupocropfield.com.br', senha: 'user123', setor: 'Geral', role: 'colaborador' },
+      { id: 'user-2', nome: 'Usuário', email: 'user', senha: 'user', setor: 'Geral', role: 'colaborador' },
+    ];
+    
+    let processed = 0;
+    
+    users.forEach((user) => {
+      const hashedPassword = bcrypt.hashSync(user.senha, 10);
+      
+      db.run(
+        `INSERT OR REPLACE INTO usuarios (id, nome, email, senha, setor, role, ativo)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        [user.id, user.nome, user.email, hashedPassword, user.setor, user.role],
+        function(err) {
+          if (err) {
+            console.error(`[DEMO] Error creating user ${user.email}:`, err);
+          } else {
+            console.log(`[DEMO] ✅ User created: ${user.email} (${user.nome}) - Role: ${user.role}`);
+          }
+          
+          processed++;
+          if (processed === users.length) {
+            console.log('[DEMO] All demo users processed');
+            resolve(true);
+          }
+        }
+      );
+    });
+  });
+};
+
 // Create tables if they don't exist
 db.serialize(() => {
+  console.log('[DB] Creating tables...');
+  
   // Users table
   db.run(`
     CREATE TABLE IF NOT EXISTS usuarios (
@@ -47,7 +89,13 @@ db.serialize(() => {
       ativo BOOLEAN DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating usuarios table:', err);
+    } else {
+      console.log('[DB] ✅ usuarios table ready');
+    }
+  });
 
   // Mural posts table
   db.run(`
@@ -63,7 +111,13 @@ db.serialize(() => {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES usuarios(id)
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating mural_posts table:', err);
+    } else {
+      console.log('[DB] ✅ mural_posts table ready');
+    }
+  });
 
   // Mural likes table
   db.run(`
@@ -76,7 +130,13 @@ db.serialize(() => {
       FOREIGN KEY (post_id) REFERENCES mural_posts(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating mural_likes table:', err);
+    } else {
+      console.log('[DB] ✅ mural_likes table ready');
+    }
+  });
 
   // Mural comments table
   db.run(`
@@ -89,7 +149,13 @@ db.serialize(() => {
       FOREIGN KEY (post_id) REFERENCES mural_posts(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating mural_comments table:', err);
+    } else {
+      console.log('[DB] ✅ mural_comments table ready');
+    }
+  });
 
   // Reservas table
   db.run(`
@@ -105,7 +171,13 @@ db.serialize(() => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating reservas table:', err);
+    } else {
+      console.log('[DB] ✅ reservas table ready');
+    }
+  });
 
   // TI Solicitações table
   db.run(`
@@ -120,7 +192,13 @@ db.serialize(() => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating ti_solicitacoes table:', err);
+    } else {
+      console.log('[DB] ✅ ti_solicitacoes table ready');
+    }
+  });
 
   // Trocas proteina table
   db.run(`
@@ -133,7 +211,13 @@ db.serialize(() => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_email, data)
     )
-  `);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating trocas_proteina table:', err);
+    } else {
+      console.log('[DB] ✅ trocas_proteina table ready');
+    }
+  });
 
   // Portaria agendamentos table
   db.run(`
@@ -148,42 +232,19 @@ db.serialize(() => {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES usuarios(id)
     )
-  `);
-
-  // Insert demo admin user
-  const hashedPassword = bcrypt.hashSync('admin123', 10);
-  db.run(`
-    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
-    VALUES ('admin-1', 'Administrador', 'admin@grupocropfield.com.br', ?, 'TI', 'admin')
-  `, [hashedPassword]);
-
-  // Insert super admin with simple credentials
-  const superAdminPassword = bcrypt.hashSync('admin', 10);
-  db.run(`
-    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
-    VALUES ('super-admin', 'Super Administrador', 'admin', ?, 'TI', 'admin')
-  `, [superAdminPassword]);
+  `, (err) => {
+    if (err) {
+      console.error('[DB] Error creating portaria_agendamentos table:', err);
+    } else {
+      console.log('[DB] ✅ portaria_agendamentos table ready');
+      // Create demo users after all tables are ready
+      setTimeout(() => {
+        createDemoUsers();
+      }, 500);
+    }
+  });
   
-  // Insert other demo users
-  const rhPassword = bcrypt.hashSync('rh123', 10);
-  db.run(`
-    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
-    VALUES ('rh-1', 'RH Manager', 'rh@grupocropfield.com.br', ?, 'RH', 'rh')
-  `, [rhPassword]);
-  
-  const userPassword = bcrypt.hashSync('user123', 10);
-  db.run(`
-    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
-    VALUES ('user-1', 'Usuário Teste', 'user@grupocropfield.com.br', ?, 'Geral', 'colaborador')
-  `, [userPassword]);
-  
-  const simpleUserPassword = bcrypt.hashSync('user', 10);
-  db.run(`
-    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
-    VALUES ('user-2', 'Usuário', 'user', ?, 'Geral', 'colaborador')
-  `, [simpleUserPassword]);
-  
-  console.log('[SERVER] Database tables and demo users initialized');
+  console.log('[SERVER] Database tables setup initiated');
 });
 
 // Middleware
@@ -1012,10 +1073,33 @@ app.use((req, res) => {
   res.status(404).json({ ok: false, error: 'Route not found' });
 });
 
+// Emergency route to recreate users if needed
+app.post('/api/debug/recreate-users', (req, res) => {
+  console.log('[DEBUG] Force recreating demo users...');
+  
+  createDemoUsers().then(() => {
+    db.all('SELECT email, nome, role, setor FROM usuarios WHERE ativo = 1', (err, users) => {
+      if (err) {
+        console.error('[DEBUG] Error listing users:', err);
+        return res.status(500).json({ error: 'Database error' });
+      }
+      
+      res.json({
+        message: 'Demo users recreated',
+        users: users || [],
+        count: users?.length || 0
+      });
+    });
+  }).catch((error) => {
+    console.error('[DEBUG] Error recreating users:', error);
+    res.status(500).json({ error: 'Failed to recreate users' });
+  });
+});
+
 // Debug route to check database users
 app.get('/api/debug/users', (req, res) => {
   console.log('[DEBUG] Checking database users...');
-  db.all('SELECT id, nome, email, setor, role, ativo FROM usuarios', (err, users) => {
+  db.all('SELECT id, nome, email, setor, role, ativo, created_at FROM usuarios', (err, users) => {
     if (err) {
       console.error('[DEBUG] Database error:', err);
       return res.status(500).json({ error: 'Database error' });
@@ -1025,7 +1109,8 @@ app.get('/api/debug/users', (req, res) => {
     res.json({ 
       users: users || [],
       count: users?.length || 0,
-      database_path: DB_PATH
+      database_path: DB_PATH,
+      recreate_url: '/api/debug/recreate-users'
     });
   });
 });
@@ -1036,17 +1121,22 @@ app.listen(PORT, () => {
   console.log(`[SERVER] Database: ${DB_PATH}`);
   console.log(`[SERVER] Demo mode: ${!!process.env.DEMO_MODE || true}`);
   
-  // Verify demo users exist on startup
-  setTimeout(() => {
-    db.all('SELECT email, nome, role FROM usuarios WHERE ativo = 1', (err, users) => {
+  // Force create demo users after server starts
+  setTimeout(async () => {
+    console.log('[SERVER] Forcing demo users creation...');
+    await createDemoUsers();
+    
+    // Verify users exist
+    db.all('SELECT email, nome, role, setor FROM usuarios WHERE ativo = 1', (err, users) => {
       if (!err && users) {
-        console.log(`[SERVER] Available demo users: ${users.length}`);
+        console.log(`[SERVER] ✅ Available demo users: ${users.length}`);
         users.forEach(user => {
-          console.log(`  - ${user.email} (${user.nome}) - Role: ${user.role}`);
+          console.log(`  - ${user.email} (${user.nome}) - Role: ${user.role} - Setor: ${user.setor}`);
         });
+        console.log('[SERVER] 🎯 Try logging in with: admin / admin');
       }
     });
-  }, 1000);
+  }, 2000);
 });
 
 // Graceful shutdown
