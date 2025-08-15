@@ -144,10 +144,10 @@ export const LoginPage: React.FC = () => {
 
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
-              <strong>Credenciais de teste:</strong><br />
-              admin / admin ou user / user<br />
+              <strong>Acesso Administrador:</strong><br />
+              <code>admin</code> / <code>admin</code> (Super Admin)<br />
               <span className="text-xs text-gray-500">
-                Ou use: admin@grupocropfield.com.br / admin123
+                Ou: admin@grupocropfield.com.br / admin123
               </span>
             </p>
           </div>

@@ -550,6 +550,20 @@ export const AdminPanel: React.FC = () => {
           {/* Usuários */}
           {activeTab === 'usuarios' && (isAdmin || isRH) && (
             <div className="space-y-6">
+              {/* Quick Admin Access Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-center space-x-2 mb-2">
+                  <Crown className="w-5 h-5 text-blue-600" />
+                  <h3 className="font-semibold text-blue-900">Acesso Administrador</h3>
+                </div>
+                <div className="text-sm text-blue-800 space-y-1">
+                  <p><strong>Super Admin:</strong> <code>admin</code> / <code>admin</code></p>
+                  <p><strong>Admin Completo:</strong> <code>admin@grupocropfield.com.br</code> / <code>admin123</code></p>
+                  <p><strong>Usuário RH:</strong> <code>rh@grupocropfield.com.br</code> / <code>rh123</code></p>
+                  <p className="text-blue-600 mt-2">💡 Use o botão <Crown className="w-3 h-3 inline" /> para promover usuários a admin</p>
+                </div>
+              </div>
+
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900">Gerenciamento de Usuários</h2>
                 <button
