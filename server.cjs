@@ -452,16 +452,32 @@ app.get('/auth/google/callback',
   passport.authenticate('google', { session: false }),
   (req, res) => {
     try {
+  console.log('[MURAL-RH-POST] Creating post via RH endpoint...');
       const token = jwt.sign({ sub: req.user.id }, JWT_SECRET, { expiresIn: '7d' });
       res.cookie('sid', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000
+        if (err) {
+          console.error('[MURAL-RH-POST] Database error:', err);
+          reject(err);
+        } else {
+          console.log('[MURAL-RH-POST] User found:', row?.nome, 'Setor:', row?.setor, 'Role:', row?.role);
+          resolve(row);
+        }
       });
+    } catch (pointsError) {
+      console.error('[MURAL-RH-POST] Failed to add points:', pointsError);
+      // Don't fail the request if points fail
+    }
       res.redirect(`${FRONTEND_URL}/`);
-    } catch (error) {
+    res.status(201).json({ 
+      success: true, 
+      id: result.id, 
+      message: 'Post criado com sucesso',
+      points: 15
+    });
       console.error('Erro no callback OAuth:', error);
+    console.error('[MURAL-RH-POST] Error creating post:', error);
       res.redirect(`${FRONTEND_URL}/login?error=oauth_error`);
     }
   }
@@ -520,6 +536,7 @@ app.post('/auth/login', async (req, res) => {
     });
 
     res.json({ ok: true, message: 'Login realizado com sucesso',
+      console.log('[MURAL-RH-POST] User not found');
       user: { id: dbUser.id, email: dbUser.email, nome: dbUser.nome, setor: dbUser.setor, role: dbUser.role || 'colaborador' }});
   } catch (error) {
     console.error('Erro no login manual:', error);
@@ -1235,6 +1252,7 @@ app.post('/api/mural/posts', authMiddleware, getUserMiddleware, async (req, res)
 
     // Check if user can post (RH, TI, or admin)
     const canPost = req.user.setor === 'RH' || req.user.setor === 'TI' || req.user.role === 'admin';
+    console.log('[MURAL-RH-POST] Can post:', canPost, 'Setor:', user.setor, 'Role:', user.role);
     if (!canPost) {
       console.log('[MURAL] User cannot post:', req.user.email, req.user.setor, req.user.role);
       return res.status(403).json({ ok: false, error: 'Apenas usuários do RH e TI podem criar posts' });
@@ -1418,6 +1436,7 @@ app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
     }
 
     const { trocas } = req.body;
+    console.log('[MURAL-RH-POST] Creating post:', { titulo, conteudo, pinned });
     if (!Array.isArray(trocas) || trocas.length === 0) {
       return res.status(400).json({ ok: false, error: 'Lista de trocas é obrigatória' });
     }
@@ -1429,18 +1448,26 @@ app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
       if (!data || !proteina_nova || proteina_nova === proteina_original) {
         console.log('[TROCAS] Skipping invalid exchange:', troca);
         continue;
+            console.error('[MURAL-RH-POST] Insert error:', err);
       }
 
+            console.log('[MURAL-RH-POST] Post created with ID:', this.lastID);
       const existing = await get(
         "SELECT * FROM trocas_proteina WHERE user_id = ? AND data = ?",
         [req.userId, data]
+    try {
       );
 
       if (!existing) {
         const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
         console.log('[TROCAS] Inserting exchange:', { data, dia, proteina_original, proteina_nova });
-        await run(
-          "INSERT INTO trocas_proteina(data, dia, proteina_original, proteina_nova, user_id) VALUES(?, ?, ?, ?, ?)",
+            if (err) {
+              console.error('[MURAL-RH-POST] Points error:', err);
+              reject(err);
+            } else {
+              console.log('[MURAL-RH-POST] Points added for post creation');
+              resolve(this);
+            }
           [data, dia, proteina_original, proteina_nova, req.userId]
         );
         await registrarPontos(req.userId, 'TROCA_PROTEINA', POINTS.TROCA_PROTEINA, { data });

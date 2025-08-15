@@ -142,7 +142,7 @@ export const Mural: React.FC = () => {
 
     try {
       console.log('[MURAL] Creating comment for post:', postId);
-      const response = await fetch(`${API_BASE}/api/rh/mural/${postId}/comments`, {
+      const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -152,6 +152,8 @@ export const Mural: React.FC = () => {
       });
 
       if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('[MURAL] Comment failed:', response.status, errorData);
         throw new Error(`HTTP ${response.status}`);
       }
 
