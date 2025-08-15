@@ -156,6 +156,12 @@ db.serialize(() => {
     VALUES ('admin-1', 'Administrador', 'admin@grupocropfield.com.br', ?, 'TI', 'admin')
   `, [hashedPassword]);
 
+  // Insert super admin with simple credentials
+  const superAdminPassword = bcrypt.hashSync('admin', 10);
+  db.run(`
+    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
+    VALUES ('super-admin', 'Super Administrador', 'admin', ?, 'TI', 'admin')
+  `, [superAdminPassword]);
   console.log('[SERVER] Database tables initialized');
 });
 
