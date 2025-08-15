@@ -383,23 +383,24 @@ app.use(cors({
 
 // Authentication middleware
 const requireAuth = (req, res, next) => {
-  console.log('[AUTH] Checking authentication...');
-  console.log('[AUTH] Cookies:', req.cookies);
+  console.log('[AUTH] 🔐 Checking authentication...');
   
   const token = req.cookies.sid || req.headers.authorization?.replace('Bearer ', '');
   
   if (!token) {
-    console.log('[AUTH] No token found');
+    console.log('[AUTH] ❌ No token found');
     return res.status(401).json({ ok: false, error: 'Authentication required' });
   }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    console.log('[AUTH] Token decoded:', decoded);
+    console.log('[AUTH] ✅ Token valid for user:', decoded.email);
     req.user = decoded;
     next();
   } catch (error) {
-    console.log('[AUTH] Token verification failed:', error.message);
+    console.log('[AUTH] ❌ Token verification failed:', error.message);
+    // Clear invalid cookie
+    res.clearCookie('sid');
     return res.status(401).json({ ok: false, error: 'Invalid token' });
   }
 };
@@ -407,7 +408,7 @@ const requireAuth = (req, res, next) => {
 // Role-based middleware
 const requireRole = (...roles) => {
   return (req, res, next) => {
-    console.log('[RBAC] Checking roles:', roles, 'User role:', req.user?.role, 'User sector:', req.user?.setor);
+    console.log('[RBAC] 🔑 Checking roles:', roles, 'User:', req.user?.email, 'Role:', req.user?.role, 'Sector:', req.user?.setor);
     
     if (!req.user) {
       return res.status(401).json({ ok: false, error: 'Authentication required' });
@@ -415,31 +416,38 @@ const requireRole = (...roles) => {
     
     const userRole = req.user.role || 'colaborador';
     const userSetor = req.user.setor || req.user.sector || '';
+    const userEmail = req.user.email || '';
     
     // Admin always has access
     if (userRole === 'admin') {
-      console.log('[RBAC] Admin access granted');
+      console.log('[RBAC] ✅ Admin access granted');
       return next();
     }
     
     // Check if user role is in allowed roles
     if (roles.includes(userRole)) {
-      console.log('[RBAC] Role access granted:', userRole);
+      console.log('[RBAC] ✅ Role access granted:', userRole);
       return next();
     }
     
     // Check if user sector is in allowed roles (for RH/TI)
     if (roles.includes('rh') && userSetor.toUpperCase() === 'RH') {
-      console.log('[RBAC] RH sector access granted');
+      console.log('[RBAC] ✅ RH sector access granted');
       return next();
     }
     
     if (roles.includes('ti') && userSetor.toUpperCase() === 'TI') {
-      console.log('[RBAC] TI sector access granted');
+      console.log('[RBAC] ✅ TI sector access granted');
       return next();
     }
     
-    console.log('[RBAC] Access denied for user:', req.user);
+    // Special case: allow admins and users from specific emails
+    if (userEmail === 'admin@grupocropfield.com.br' || userEmail === 'superadmin@grupocropfield.com.br') {
+      console.log('[RBAC] ✅ Admin email access granted');
+      return next();
+    }
+    
+    console.log('[RBAC] ❌ Access denied for user:', userEmail, 'Role:', userRole, 'Sector:', userSetor);
     return res.status(403).json({ ok: false, error: 'Insufficient permissions' });
   };
 };
@@ -647,14 +655,40 @@ app.post('/api/rh/mural/posts', requireAuth, requireRole('rh', 'admin'), (req, r
 });
 
 // Aliases for compatibility
-app.post('/api/mural/posts', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  console.log('[MURAL-POST-ALIAS] Creating post via alias...');
-  req.url = '/api/rh/mural/posts';
-  app._router.handle(req, res);
+app.post('/api/mural/posts', requireAuth, requireRole('rh', 'admin', 'ti'), (req, res) => {
+  console.log('[MURAL-POST] 📝 Creating post:', req.body);
+  
+  const { titulo, conteudo, pinned } = req.body;
+  
+  if (!titulo?.trim() || !conteudo?.trim()) {
+    return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
+  }
+
+  const postId = `post_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  
+  db.run(
+    `INSERT INTO mural_posts (id, titulo, conteudo, author, user_id, pinned) 
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [postId, titulo.trim(), conteudo.trim(), req.user.name, req.user.id, pinned ? 1 : 0],
+    function(err) {
+      if (err) {
+        console.error('[MURAL-POST] ❌ Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[MURAL-POST] ✅ Post created with ID:', postId);
+      res.json({ 
+        ok: true, 
+        id: postId,
+        points: 15,
+        message: 'Post criado com sucesso'
+      });
+    }
+  );
 });
 
 app.patch('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  console.log('[MURAL-PATCH-ALIAS] Updating post:', req.params.id);
+  console.log('[MURAL-PATCH] 📝 Updating post:', req.params.id);
   
   const { titulo, conteudo, pinned } = req.body;
   const postId = req.params.id;
@@ -670,7 +704,7 @@ app.patch('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req,
     [titulo.trim(), conteudo.trim(), pinned ? 1 : 0, postId],
     function(err) {
       if (err) {
-        console.error('[MURAL-PATCH-ALIAS] Database error:', err);
+        console.error('[MURAL-PATCH] ❌ Database error:', err);
         return res.status(500).json({ ok: false, error: 'Database error' });
       }
       
@@ -678,14 +712,14 @@ app.patch('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req,
         return res.status(404).json({ ok: false, error: 'Post not found' });
       }
       
-      console.log('[MURAL-PATCH-ALIAS] Post updated:', postId);
+      console.log('[MURAL-PATCH] ✅ Post updated:', postId);
       res.json({ ok: true, message: 'Post atualizado com sucesso' });
     }
   );
 });
 
 app.delete('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  console.log('[MURAL-DELETE-ALIAS] Soft deleting post:', req.params.id);
+  console.log('[MURAL-DELETE] 🗑️ Soft deleting post:', req.params.id);
   
   const postId = req.params.id;
   
@@ -694,7 +728,7 @@ app.delete('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req
     [postId],
     function(err) {
       if (err) {
-        console.error('[MURAL-DELETE-ALIAS] Database error:', err);
+        console.error('[MURAL-DELETE] ❌ Database error:', err);
         return res.status(500).json({ ok: false, error: 'Database error' });
       }
       
@@ -702,7 +736,7 @@ app.delete('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req
         return res.status(404).json({ ok: false, error: 'Post not found' });
       }
       
-      console.log('[MURAL-DELETE-ALIAS] Post deleted:', postId);
+      console.log('[MURAL-DELETE] ✅ Post deleted:', postId);
       res.json({ ok: true, message: 'Post deletado com sucesso' });
     }
   );
