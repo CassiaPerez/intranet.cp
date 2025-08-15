@@ -6,7 +6,6 @@ import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useGamification } from '../contexts/GamificationContext';
-import { getAuthHeadersWithJson } from '../utils/authUtils';
 
 const PROTEIN_OPTIONS = ['Frango','Omelete','Ovo frito','Ovo cozido'] as const;
 type ProteinLabel = typeof PROTEIN_OPTIONS[number];
@@ -76,7 +75,6 @@ export const TrocaProteinas: React.FC = () => {
         console.log('[TROCAS] Loading existing exchanges from API...');
         const prevRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, { 
           credentials: 'include',
-          headers: getAuthHeadersWithJson(user)
         });
         
         if (prevRes.ok) {
@@ -242,7 +240,9 @@ export const TrocaProteinas: React.FC = () => {
       
       const response = await fetch(`${API_BASE}/api/trocas-proteina/bulk`, {
         method: 'POST',
-        headers: getAuthHeadersWithJson(user),
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
         body: JSON.stringify({ trocas: payload }),
       });

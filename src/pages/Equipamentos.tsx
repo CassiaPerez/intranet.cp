@@ -24,7 +24,7 @@ interface EquipmentRequest {
  * Se tiver VITE_API_URL (ex.: https://api.suaempresa.com), usa ela.
  * Caso contrário, usa '' + '/api/...' (via proxy do Vite).
  */
-const BASE_API = (import.meta.env.VITE_API_URL?.replace(/\/+$/, '') || '');
+const BASE_API = import.meta.env.VITE_API_URL || '';
 
 
 /** ========= Utils ========= */
@@ -137,7 +137,6 @@ const Equipamentos: React.FC = () => {
       const url = `${BASE_API}${path}`;
       const response = await fetch(url, {
         credentials: 'include',
-        headers: getAuthHeaders(user),
       });
 
       if (!response.ok) {

@@ -93,6 +93,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               // Normalize API user data
               if (data.user) {
                 if (data.user.sector && !data.user.setor) {
+          // Store user data with token
+          if (data.user) {
+            localStorage.setItem('currentUser', JSON.stringify(data.user));
+            console.log('API user logged in:', data.user);
+          }
+          
                   data.user.setor = data.user.sector;
                 }
                 if (data.user.setor && !data.user.sector) {

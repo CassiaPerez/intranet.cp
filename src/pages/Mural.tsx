@@ -5,9 +5,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import toast from 'react-hot-toast';
-import { getAuthHeaders, getAuthHeadersWithJson } from '../utils/authUtils';
 
-const API_BASE = '';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 interface Post {
   id: string;
@@ -50,8 +49,7 @@ export const Mural: React.FC = () => {
       setLoading(true);
       console.log('[MURAL] Loading posts...');
       const response = await fetch(`${API_BASE}/api/mural/posts`, {
-        credentials: 'include',
-        headers: getAuthHeaders(user)
+        credentials: 'include'
       });
 
       if (!response.ok) {
@@ -80,9 +78,11 @@ export const Mural: React.FC = () => {
 
     try {
       console.log('[MURAL] Creating post:', newPost);
-      const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
+      const response = await fetch(`${API_BASE}/api/mural/posts`, {
         method: 'POST',
-        headers: getAuthHeadersWithJson(user),
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
         body: JSON.stringify(newPost),
       });
@@ -110,9 +110,8 @@ export const Mural: React.FC = () => {
   const handleReaction = async (postId: string) => {
     try {
       console.log('[MURAL] Processing like for post:', postId);
-      const response = await fetch(`${API_BASE}/api/rh/mural/${postId}/like`, {
+      const response = await fetch(`${API_BASE}/api/mural/${postId}/like`, {
         method: 'POST',
-        headers: getAuthHeaders(user),
         credentials: 'include',
       });
 
