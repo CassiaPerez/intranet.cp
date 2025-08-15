@@ -966,6 +966,28 @@ app.get('/api/trocas-proteina', requireAuth, (req, res) => {
   });
 });
 
+// Helper function to check if exchange is within deadline
+const isWithinExchangeDeadline = (exchangeDate) => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const cutoffTime = new Date(today);
+  cutoffTime.setHours(16, 0, 0, 0); // 16:00 (4 PM)
+  
+  const targetDate = new Date(exchangeDate);
+  const targetDateOnly = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  
+  // If it's past 4 PM today, minimum exchange date is day after tomorrow
+  // If it's before 4 PM today, minimum exchange date is tomorrow
+  const minExchangeDate = new Date(today);
+  if (now >= cutoffTime) {
+    minExchangeDate.setDate(today.getDate() + 2); // Day after tomorrow
+  } else {
+    minExchangeDate.setDate(today.getDate() + 1); // Tomorrow
+  }
+  
+  return targetDateOnly >= minExchangeDate;
+};
+
 app.post('/api/trocas-proteina/bulk', requireAuth, (req, res) => {
   console.log('[TROCAS-BULK] Saving bulk protein exchanges...');
   
@@ -974,6 +996,31 @@ app.post('/api/trocas-proteina/bulk', requireAuth, (req, res) => {
   
   if (!Array.isArray(trocas) || trocas.length === 0) {
     return res.status(400).json({ ok: false, error: 'Nenhuma troca fornecida' });
+  }
+
+  // Validate exchange deadlines
+  const invalidExchanges = trocas.filter(troca => !isWithinExchangeDeadline(troca.data));
+  
+  if (invalidExchanges.length > 0) {
+    const now = new Date();
+    const cutoffTime = new Date();
+    cutoffTime.setHours(16, 0, 0, 0);
+    const isPastCutoff = now >= cutoffTime;
+    
+    const invalidDates = invalidExchanges.map(t => {
+      const date = new Date(t.data);
+      return date.toLocaleDateString('pt-BR');
+    }).join(', ');
+    
+    const deadline = isPastCutoff 
+      ? 'após 16h - só é possível trocar proteínas para depois de amanhã'
+      : 'antes das 16h - só é possível trocar proteínas para amanhã em diante';
+    
+    return res.status(400).json({ 
+      ok: false, 
+      error: `Prazo expirado para as datas: ${invalidDates}. Hoje é ${deadline}.`,
+      invalidDates: invalidExchanges.map(t => t.data)
+    });
   }
 
   let inseridas = 0;

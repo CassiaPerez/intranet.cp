@@ -42,6 +42,44 @@ type Troca = {
   proteina_nova?: string;
 };
 
+// Helper function to check if date is within exchange deadline
+const isWithinExchangeDeadline = (exchangeDateISO: string): boolean => {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const cutoffTime = new Date(today);
+  cutoffTime.setHours(16, 0, 0, 0); // 16:00 (4 PM)
+  
+  const targetDate = new Date(exchangeDateISO);
+  const targetDateOnly = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  
+  // If it's past 4 PM today, minimum exchange date is day after tomorrow
+  // If it's before 4 PM today, minimum exchange date is tomorrow
+  const minExchangeDate = new Date(today);
+  if (now >= cutoffTime) {
+    minExchangeDate.setDate(today.getDate() + 2); // Day after tomorrow
+  } else {
+    minExchangeDate.setDate(today.getDate() + 1); // Tomorrow
+  }
+  
+  return targetDateOnly >= minExchangeDate;
+};
+
+// Get deadline message for UI
+const getDeadlineMessage = (): string => {
+  const now = new Date();
+  const cutoffTime = new Date();
+  cutoffTime.setHours(16, 0, 0, 0);
+  const isPastCutoff = now >= cutoffTime;
+  
+  const today = now.toLocaleDateString('pt-BR');
+  const currentTime = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  
+  if (isPastCutoff) {
+    return `⏰ Hoje ${today} às ${currentTime} - Após 16h: só é possível trocar proteínas para depois de amanhã`;
+  } else {
+    return `⏰ Hoje ${today} às ${currentTime} - Antes das 16h: é possível trocar proteínas para amanhã em diante`;
+  }
+};
 export const TrocaProteinas: React.FC = () => {
   const { user } = useAuth();
   const { addActivity } = useGamification();
@@ -197,16 +235,28 @@ export const TrocaProteinas: React.FC = () => {
       return;
     }
     
+    // Check deadline for all days
+    const validDays = diasDoMes.filter(d => {
+      const iso = format(d, 'yyyy-MM-dd');
+      const original = originalByDate[iso] || '';
+      return original && isWithinExchangeDeadline(iso);
+    });
+    
+    if (validDays.length === 0) {
+      toast.error('Nenhum dia disponível para troca dentro do prazo permitido.');
+      return;
+    }
+
     console.log('[TROCAS] Applying protein to all days:', target);
     setTrocas(prev => {
       const copy = { ...prev };
       let applied = 0;
-      for (const d of diasDoMes) {
+      for (const d of validDays) {
         const iso = format(d, 'yyyy-MM-dd');
         const original = originalByDate[iso] || '';
-        // Só aplicamos nos dias que têm cardápio (original não vazio) e quando a troca muda algo
+        // Só aplicamos nos dias que têm cardápio, estão no prazo e quando a troca muda algo
         const normalizedOriginal = normalizeProtein(original);
-        if (original && target !== normalizedOriginal) {
+        if (original && target !== normalizedOriginal && isWithinExchangeDeadline(iso)) {
           copy[iso] = { data: iso, proteina_original: original, proteina_nova: target };
           applied++;
         } else {
@@ -217,19 +267,30 @@ export const TrocaProteinas: React.FC = () => {
       console.log('[TROCAS] Applied to', applied, 'days');
       return copy;
     });
-    toast.success(`Aplicado a todos os dias disponíveis do mês.`);
+    toast.success(`Aplicado a ${validDays.length} dias dentro do prazo permitido.`);
   };
 
   // Salvar em lote via API
   const salvar = async () => {
-    const payload = Object.values(trocas).filter(t => 
-      t.proteina_nova && 
-      t.proteina_nova !== t.proteina_original && 
-      t.proteina_original
-    );
+    const payload = Object.values(trocas).filter(t => {
+      const isValid = t.proteina_nova && 
+        t.proteina_nova !== t.proteina_original && 
+        t.proteina_original;
+      
+      if (!isValid) return false;
+      
+      // Check deadline
+      if (!isWithinExchangeDeadline(t.data)) {
+        const date = new Date(t.data).toLocaleDateString('pt-BR');
+        toast.error(`Prazo expirado para ${date}. Trocas devem ser feitas até 16h do dia anterior.`);
+        return false;
+      }
+      
+      return true;
+    });
     
     if (payload.length === 0) {
-      toast('Nenhuma troca para salvar.');
+      toast('Nenhuma troca válida para salvar dentro do prazo.');
       return;
     }
     
@@ -327,6 +388,26 @@ export const TrocaProteinas: React.FC = () => {
   return (
     <Layout>
       <div className="p-4 md:p-6 space-y-4">
+        {/* Deadline Information */}
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+          <div className="flex items-start space-x-3">
+            <div className="flex-shrink-0">
+              <svg className="w-5 h-5 text-yellow-600 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+            </div>
+            <div>
+              <h3 className="text-sm font-medium text-yellow-800 mb-1">Regra de Prazo para Trocas</h3>
+              <p className="text-sm text-yellow-700 mb-2">
+                As trocas de proteínas devem ser solicitadas <strong>até às 16h do dia anterior</strong> ao dia desejado.
+              </p>
+              <p className="text-xs text-yellow-600">
+                {getDeadlineMessage()}
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div>
             <h1 className="text-xl md:text-2xl font-semibold">Troca de Proteínas</h1>
@@ -372,6 +453,7 @@ export const TrocaProteinas: React.FC = () => {
                 <th className="px-3 py-2 text-left">Proteína do Cardápio</th>
                 <th className="px-3 py-2 text-left">Trocar para</th>
                 <th className="px-3 py-2 text-left">Status</th>
+                <th className="px-3 py-2 text-left">Prazo</th>
               </tr>
             </thead>
             <tbody>
@@ -381,20 +463,21 @@ export const TrocaProteinas: React.FC = () => {
                 const currentValue = getCurrentValue(dataISO);
                 const isExisting = !!trocasExistentes[dataISO]?.proteina_nova;
                 const isNewSelection = !!trocas[dataISO]?.proteina_nova;
+                const withinDeadline = isWithinExchangeDeadline(dataISO);
 
                 return (
-                  <tr key={dataISO} className="border-t">
+                  <tr key={dataISO} className={`border-t ${!withinDeadline ? 'bg-gray-50 opacity-60' : ''}`}>
                     <td className="px-3 py-2">{format(d, 'dd/MM/yyyy (EEE)', { locale: ptBR })}</td>
                     <td className="px-3 py-2">{original}</td>
                     <td className="px-3 py-2 relative z-10 pointer-events-auto">
                       <select
-                        className="border rounded-lg px-2 py-1 w-full"
+                        className={`border rounded-lg px-2 py-1 w-full ${!withinDeadline ? 'bg-gray-100 cursor-not-allowed' : ''}`}
                         value={currentValue}
-                        onChange={(e) => handleChange(dataISO, e.target.value)}
+                        onChange={(e) => withinDeadline ? handleChange(dataISO, e.target.value) : toast.error('Prazo expirado para esta data')}
                         onMouseDown={(e)=>e.stopPropagation()}
                         onClick={(e)=>e.stopPropagation()}
                         onKeyDown={(e)=>e.stopPropagation()}
-                        disabled={loading}
+                        disabled={loading || !withinDeadline}
                       >
                         <option value="">— Manter original —</option>
                         {PROTEIN_OPTIONS.map((p) => (
@@ -413,6 +496,17 @@ export const TrocaProteinas: React.FC = () => {
                       {isNewSelection && (
                         <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
                           Novo
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {withinDeadline ? (
+                        <span className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded-full">
+                          ✅ Disponível
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded-full">
+                          ⏰ Prazo expirado
                         </span>
                       )}
                     </td>
