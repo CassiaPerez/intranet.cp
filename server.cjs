@@ -162,28 +162,27 @@ db.serialize(() => {
     INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
     VALUES ('super-admin', 'Super Administrador', 'admin', ?, 'TI', 'admin')
   `, [superAdminPassword]);
-  console.log('[SERVER] Database tables initialized');
-});
-
-// Insert demo users
-db.serialize(() => {
-  const demoUsers = [
-    { id: 'admin-1', nome: 'Administrador', email: 'admin@grupocropfield.com.br', senha: 'admin123', setor: 'TI', role: 'admin' },
-    { id: 'rh-1', nome: 'RH Manager', email: 'rh@grupocropfield.com.br', senha: 'rh123', setor: 'RH', role: 'rh' },
-    { id: 'user-1', nome: 'Usuário Teste', email: 'user@grupocropfield.com.br', senha: 'user123', setor: 'Geral', role: 'colaborador' },
-    { id: 'admin-2', nome: 'Admin', email: 'admin', senha: 'admin', setor: 'TI', role: 'admin' },
-    { id: 'user-2', nome: 'Usuário', email: 'user', senha: 'user', setor: 'Geral', role: 'colaborador' },
-  ];
-
-  for (const user of demoUsers) {
-    const hashedPassword = bcrypt.hashSync(user.senha, 10);
-    db.run(`
-      INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `, [user.id, user.nome, user.email, hashedPassword, user.setor, user.role]);
-  }
   
-  console.log('[SERVER] Demo users inserted');
+  // Insert other demo users
+  const rhPassword = bcrypt.hashSync('rh123', 10);
+  db.run(`
+    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
+    VALUES ('rh-1', 'RH Manager', 'rh@grupocropfield.com.br', ?, 'RH', 'rh')
+  `, [rhPassword]);
+  
+  const userPassword = bcrypt.hashSync('user123', 10);
+  db.run(`
+    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
+    VALUES ('user-1', 'Usuário Teste', 'user@grupocropfield.com.br', ?, 'Geral', 'colaborador')
+  `, [userPassword]);
+  
+  const simpleUserPassword = bcrypt.hashSync('user', 10);
+  db.run(`
+    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
+    VALUES ('user-2', 'Usuário', 'user', ?, 'Geral', 'colaborador')
+  `, [simpleUserPassword]);
+  
+  console.log('[SERVER] Database tables and demo users initialized');
 });
 
 // Middleware
@@ -269,10 +268,12 @@ app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
   
   if (!email || !password) {
+    console.log('[LOGIN] Missing email or password');
     return res.status(400).json({ ok: false, error: 'Email and password required' });
   }
 
   try {
+    console.log('[LOGIN] Querying database for user:', email);
     // Query user from database
     db.get(
       'SELECT * FROM usuarios WHERE email = ? AND ativo = 1',
@@ -285,17 +286,29 @@ app.post('/auth/login', async (req, res) => {
 
         if (!user) {
           console.log('[LOGIN] User not found:', email);
+          console.log('[LOGIN] Available users debug - querying all users...');
+          db.all('SELECT email, nome, role FROM usuarios WHERE ativo = 1', (debugErr, debugUsers) => {
+            if (!debugErr) {
+              console.log('[LOGIN] Available users:', debugUsers);
+            }
+          });
           return res.status(401).json({ ok: false, error: 'Invalid credentials' });
         }
 
+        console.log('[LOGIN] User found:', user.email, 'Role:', user.role, 'Setor:', user.setor);
+        
         // Check password
+        console.log('[LOGIN] Checking password...');
         const isValid = await bcrypt.compare(password, user.senha);
+        console.log('[LOGIN] Password valid:', isValid);
+        
         if (!isValid) {
           console.log('[LOGIN] Invalid password for:', email);
           return res.status(401).json({ ok: false, error: 'Invalid credentials' });
         }
 
         // Create JWT token
+        console.log('[LOGIN] Creating JWT token...');
         const token = jwt.sign(
           { 
             id: user.id,
@@ -310,6 +323,7 @@ app.post('/auth/login', async (req, res) => {
         );
 
         // Set cookie
+        console.log('[LOGIN] Setting cookie...');
         res.cookie('sid', token, {
           httpOnly: true,
           secure: false, // Set to true in production with HTTPS
@@ -997,11 +1011,41 @@ app.use((req, res) => {
   res.status(404).json({ ok: false, error: 'Route not found' });
 });
 
+// Debug route to check database users
+app.get('/api/debug/users', (req, res) => {
+  console.log('[DEBUG] Checking database users...');
+  db.all('SELECT id, nome, email, setor, role, ativo FROM usuarios', (err, users) => {
+    if (err) {
+      console.error('[DEBUG] Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+    
+    console.log('[DEBUG] Found users:', users);
+    res.json({ 
+      users: users || [],
+      count: users?.length || 0,
+      database_path: DB_PATH
+    });
+  });
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`[SERVER] Server running on http://localhost:${PORT}`);
   console.log(`[SERVER] Database: ${DB_PATH}`);
   console.log(`[SERVER] Demo mode: ${!!process.env.DEMO_MODE || true}`);
+  
+  // Verify demo users exist on startup
+  setTimeout(() => {
+    db.all('SELECT email, nome, role FROM usuarios WHERE ativo = 1', (err, users) => {
+      if (!err && users) {
+        console.log(`[SERVER] Available demo users: ${users.length}`);
+        users.forEach(user => {
+          console.log(`  - ${user.email} (${user.nome}) - Role: ${user.role}`);
+        });
+      }
+    });
+  }, 1000);
 });
 
 // Graceful shutdown
