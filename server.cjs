@@ -1077,10 +1077,24 @@ app.post('/api/rh/mural/posts', authMiddleware, getUserMiddleware, requireRole('
   }
 });
 
-app.patch('/api/rh/mural/posts/:id', authMiddleware, getUserMiddleware, requireRole('rh', 'admin'), async (req, res) => {
+app.patch('/api/mural/posts/:id', authMiddleware, getUserMiddleware, async (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
+    // Check if user can manage posts (RH, TI, admin, or post author)
+    const canManage = req.user.setor === 'RH' || req.user.setor === 'TI' || req.user.role === 'admin';
+    if (!canManage) {
+      // Check if user is the author
+      const post = await get("SELECT author FROM mural_posts WHERE id = ?", [req.params.id]);
+      if (!post || post.author !== req.user.nome) {
+        return res.status(403).json({ ok: false, error: 'Sem permissão para editar este post' });
+      }
+    }
+
     const { titulo, conteudo, pinned } = req.body;
-    const postId = req.params.id;
+    console.log('[MURAL] Updating post:', req.params.id, { titulo, conteudo, pinned });
 
     const updates = [];
     const values = [];
@@ -1093,23 +1107,44 @@ app.patch('/api/rh/mural/posts/:id', authMiddleware, getUserMiddleware, requireR
       return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
     }
 
-    values.push(postId);
+    values.push(req.params.id);
     await run(`UPDATE mural_posts SET ${updates.join(', ')} WHERE id = ?`, values);
 
+    console.log('[MURAL] Post updated successfully');
     res.json({ ok: true });
   } catch (error) {
-    console.error('Erro ao atualizar post:', error);
+    console.error('[MURAL] Error updating post:', error);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar post' });
   }
 });
 
-app.delete('/api/rh/mural/posts/:id', authMiddleware, getUserMiddleware, requireRole('rh', 'admin'), async (req, res) => {
+app.delete('/api/mural/posts/:id', authMiddleware, getUserMiddleware, async (req, res) => {
   try {
-    const postId = req.params.id;
-    await run("DELETE FROM mural_posts WHERE id = ?", [postId]);
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
+    // Check if user can manage posts (RH, TI, admin, or post author)
+    const canManage = req.user.setor === 'RH' || req.user.setor === 'TI' || req.user.role === 'admin';
+    if (!canManage) {
+      // Check if user is the author
+      const post = await get("SELECT author FROM mural_posts WHERE id = ?", [req.params.id]);
+      if (!post || post.author !== req.user.nome) {
+        return res.status(403).json({ ok: false, error: 'Sem permissão para deletar este post' });
+      }
+    }
+
+    console.log('[MURAL] Deleting post:', req.params.id);
+    
+    // Delete comments and likes first (foreign key constraints)
+    await run("DELETE FROM mural_comments WHERE post_id = ?", [req.params.id]);
+    await run("DELETE FROM mural_likes WHERE post_id = ?", [req.params.id]);
+    await run("DELETE FROM mural_posts WHERE id = ?", [req.params.id]);
+
+    console.log('[MURAL] Post deleted successfully');
     res.json({ ok: true });
   } catch (error) {
-    console.error('Erro ao deletar post:', error);
+    console.error('[MURAL] Error deleting post:', error);
     res.status(500).json({ ok: false, error: 'Erro ao deletar post' });
   }
 });
