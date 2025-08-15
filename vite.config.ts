@@ -14,6 +14,9 @@ export default defineConfig(({ mode }) => {
       port: 0,
       strictPort: false,
       host: true, // acessível pela rede/StackBlitz
+      watch: {
+        ignored: ['**/data/**'], // Ignore database files to prevent EIO errors
+      },
       hmr: {
         overlay: false, // Disable error overlay that can cause crashes
       },
