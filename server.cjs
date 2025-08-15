@@ -909,6 +909,31 @@ app.get('/api/ti/solicitacoes', requireAuth, (req, res) => {
   });
 });
 
+app.get('/api/ti/minhas', requireAuth, (req, res) => {
+  console.log('[TI-MINHAS] 💻 Loading user equipment requests for:', req.user?.email);
+  
+  const userEmail = req.user?.email;
+  
+  if (!userEmail) {
+    console.log('[TI-MINHAS] ❌ No user email available');
+    return res.status(400).json({ ok: false, error: 'User email not available' });
+  }
+  
+  db.all(
+    'SELECT * FROM ti_solicitacoes WHERE user_email = ? ORDER BY created_at DESC',
+    [userEmail],
+    (err, rows) => {
+      if (err) {
+        console.error('[TI-MINHAS] ❌ Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[TI-MINHAS] ✅ Found', rows.length, 'requests for user:', userEmail);
+      res.json({ ok: true, solicitacoes: rows || [] });
+    }
+  );
+});
+
 app.post('/api/ti/solicitacoes', requireAuth, (req, res) => {
   console.log('[TI-POST] Creating equipment request:', req.body);
   

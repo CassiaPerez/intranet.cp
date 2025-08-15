@@ -39,6 +39,14 @@ export const Mural: React.FC = () => {
   const [commentTexts, setCommentTexts] = useState<{ [key: string]: string }>({});
   
   const canPost = user?.setor === 'TI' || user?.setor === 'RH' || user?.role === 'admin';
+  
+  // Debug user permissions
+  console.log('[MURAL] User permissions check:', {
+    user: user?.name,
+    setor: user?.setor,
+    role: user?.role,
+    canPost
+  });
 
   useEffect(() => {
     loadPosts();
