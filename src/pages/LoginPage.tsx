@@ -54,7 +54,7 @@ export const LoginPage: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/auth/login`, {
+      const response = await fetch('/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -155,7 +155,7 @@ export const AdminPanel: React.FC = () => {
   const loadUsuarios = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/admin/users`, { credentials: 'include' });
+      const res = await fetch('/api/admin/users', { credentials: 'include' });
       const data = await res.json().catch(() => ({}));
       if (res.ok) setUsuarios(data.users || []);
       else toast.error(data.error || 'Erro ao carregar usuários');
@@ -186,7 +186,7 @@ export const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       if (userModalMode === 'create') {
-        const res = await fetch(`${API_BASE}/api/admin/users`, {
+        const res = await fetch('/api/admin/users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -196,7 +196,7 @@ export const AdminPanel: React.FC = () => {
         if (!res.ok) throw new Error(j.error || 'Erro ao criar usuário');
         toast.success('Usuário criado!');
       } else if (selectedUser) {
-        const res = await fetch(`${API_BASE}/api/admin/users/${selectedUser.id}`, {
+        const res = await fetch(`/api/admin/users/${selectedUser.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -225,7 +225,7 @@ export const AdminPanel: React.FC = () => {
     const novaSenha = prompt('Digite a nova senha:');
     if (!novaSenha) return;
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}/password`, {
+      const res = await fetch(`/api/admin/users/${userId}/password`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -241,7 +241,7 @@ export const AdminPanel: React.FC = () => {
 
   const handleToggleUserStatus = async (userId: string, currentStatus: boolean) => {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/users/${userId}`, {
+      const res = await fetch(`/api/admin/users/${userId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -261,7 +261,7 @@ export const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       console.log('[ADMIN-TI] Loading TI requests...');
-      const res = await fetch(`${API_BASE}/api/ti/solicitacoes`, { credentials: 'include' });
+      const res = await fetch('/api/ti/solicitacoes', { credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao carregar solicitações TI');
       console.log('[ADMIN-TI] Loaded', j.solicitacoes?.length || 0, 'requests');
@@ -279,7 +279,7 @@ export const AdminPanel: React.FC = () => {
     if (!tiFormData.titulo) return toast.error('Título é obrigatório!');
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/api/ti/solicitacoes`, {
+      const res = await fetch('/api/ti/solicitacoes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -301,7 +301,7 @@ export const AdminPanel: React.FC = () => {
   const handleTIStatusUpdate = async (solicitacaoId: string, novoStatus: SolicitacaoTI['status']) => {
     try {
       console.log('[ADMIN-TI] Updating status for request', solicitacaoId, 'to', novoStatus);
-      const res = await fetch(`${API_BASE}/api/ti/solicitacoes/${solicitacaoId}`, {
+      const res = await fetch(`/api/ti/solicitacoes/${solicitacaoId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -323,7 +323,7 @@ export const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       console.log('[ADMIN-RH] Loading mural posts...');
-      const res = await fetch(`${API_BASE}/api/rh/mural/posts`, { credentials: 'include' });
+      const res = await fetch('/api/mural/posts', { credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao carregar posts do mural');
       console.log('[ADMIN-RH] Loaded', j.posts?.length || 0, 'posts');
@@ -353,7 +353,7 @@ export const AdminPanel: React.FC = () => {
       setLoading(true);
       if (rhModalMode === 'create') {
         console.log('[ADMIN-RH] Creating post:', rhFormData);
-        const res = await fetch(`${API_BASE}/api/rh/mural/posts`, {
+        const res = await fetch('/api/mural/posts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -365,7 +365,7 @@ export const AdminPanel: React.FC = () => {
         toast.success('Post criado!');
       } else if (selectedPost) {
         console.log('[ADMIN-RH] Updating post:', selectedPost.id);
-        const res = await fetch(`${API_BASE}/api/rh/mural/posts/${selectedPost.id}`, {
+        const res = await fetch(`/api/mural/posts/${selectedPost.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -390,7 +390,7 @@ export const AdminPanel: React.FC = () => {
     if (!confirm('Tem certeza que deseja deletar este post?')) return;
     try {
       console.log('[ADMIN-RH] Deleting post:', postId);
-      const res = await fetch(`${API_BASE}/api/rh/mural/posts/${postId}`, { method: 'DELETE', credentials: 'include' });
+      const res = await fetch(`/api/mural/posts/${postId}`, { method: 'DELETE', credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao deletar post');
       console.log('[ADMIN-RH] Post deleted successfully');

@@ -64,6 +64,48 @@ db.serialize(() => {
     )
   `);
 
+  // Mural likes table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS mural_likes (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(post_id, user_id),
+      FOREIGN KEY (post_id) REFERENCES mural_posts(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Mural comments table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS mural_comments (
+      id TEXT PRIMARY KEY,
+      post_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      texto TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (post_id) REFERENCES mural_posts(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+    )
+  `);
+
+  // Reservas table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS reservas (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      sala TEXT NOT NULL,
+      data DATE NOT NULL,
+      inicio TIME NOT NULL,
+      fim TIME NOT NULL,
+      assunto TEXT NOT NULL,
+      responsavel TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES usuarios(id) ON DELETE CASCADE
+    )
+  `);
+
   // TI Solicitações table
   db.run(`
     CREATE TABLE IF NOT EXISTS ti_solicitacoes (
@@ -89,6 +131,21 @@ db.serialize(() => {
       proteina_nova TEXT NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(user_email, data)
+    )
+  `);
+
+  // Portaria agendamentos table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS portaria_agendamentos (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      data DATE NOT NULL,
+      hora TIME NOT NULL,
+      visitante TEXT NOT NULL,
+      documento TEXT,
+      observacao TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES usuarios(id)
     )
   `);
 
@@ -417,6 +474,143 @@ app.delete('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req
   );
 });
 
+// Mural reactions routes
+app.post('/api/mural/:id/like', requireAuth, (req, res) => {
+  console.log('[MURAL-LIKE] Processing like for post:', req.params.id);
+  
+  const postId = req.params.id;
+  const userId = req.user.id;
+  const likeId = `like_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  
+  // Check if user already liked this post
+  db.get(
+    'SELECT id FROM mural_likes WHERE post_id = ? AND user_id = ?',
+    [postId, userId],
+    (err, existingLike) => {
+      if (err) {
+        console.error('[MURAL-LIKE] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      if (existingLike) {
+        // Unlike
+        db.run(
+          'DELETE FROM mural_likes WHERE post_id = ? AND user_id = ?',
+          [postId, userId],
+          function(err) {
+            if (err) {
+              console.error('[MURAL-LIKE] Error removing like:', err);
+              return res.status(500).json({ ok: false, error: 'Database error' });
+            }
+            
+            console.log('[MURAL-LIKE] Like removed');
+            res.json({ ok: true, action: 'unliked', message: 'Like removido' });
+          }
+        );
+      } else {
+        // Like
+        db.run(
+          'INSERT INTO mural_likes (id, post_id, user_id) VALUES (?, ?, ?)',
+          [likeId, postId, userId],
+          function(err) {
+            if (err) {
+              console.error('[MURAL-LIKE] Error adding like:', err);
+              return res.status(500).json({ ok: false, error: 'Database error' });
+            }
+            
+            console.log('[MURAL-LIKE] Like added');
+            res.json({ ok: true, action: 'liked', points: 2, message: 'Like adicionado' });
+          }
+        );
+      }
+    }
+  );
+});
+
+app.post('/api/mural/:id/comments', requireAuth, (req, res) => {
+  console.log('[MURAL-COMMENT] Creating comment for post:', req.params.id);
+  
+  const { texto } = req.body;
+  const postId = req.params.id;
+  const userId = req.user.id;
+  const commentId = `comment_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  
+  if (!texto?.trim()) {
+    return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
+  }
+
+  db.run(
+    'INSERT INTO mural_comments (id, post_id, user_id, texto) VALUES (?, ?, ?, ?)',
+    [commentId, postId, userId, texto.trim()],
+    function(err) {
+      if (err) {
+        console.error('[MURAL-COMMENT] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[MURAL-COMMENT] Comment created with ID:', commentId);
+      res.json({ 
+        ok: true, 
+        id: commentId,
+        points: 3,
+        message: 'Comentário adicionado com sucesso'
+      });
+    }
+  );
+});
+
+// Reservas routes
+app.get('/api/reservas', requireAuth, (req, res) => {
+  console.log('[RESERVAS-GET] Loading reservations...');
+  
+  db.all(
+    'SELECT * FROM reservas ORDER BY data, inicio',
+    (err, rows) => {
+      if (err) {
+        console.error('[RESERVAS-GET] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[RESERVAS-GET] Found', rows.length, 'reservations');
+      res.json({ ok: true, reservas: rows || [] });
+    }
+  );
+});
+
+app.post('/api/reservas', requireAuth, (req, res) => {
+  console.log('[RESERVAS-POST] Creating reservation:', req.body);
+  
+  const { sala, data, inicio, fim, assunto } = req.body;
+  const userId = req.user.id;
+  const userName = req.user.name;
+  
+  if (!sala || !data || !inicio || !fim || !assunto) {
+    return res.status(400).json({ ok: false, error: 'Todos os campos são obrigatórios' });
+  }
+
+  const reservaId = `reserva_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  
+  db.run(
+    `INSERT INTO reservas (id, user_id, sala, data, inicio, fim, assunto, responsavel) 
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [reservaId, userId, sala, data, inicio, fim, assunto, userName],
+    function(err) {
+      if (err) {
+        console.error('[RESERVAS-POST] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[RESERVAS-POST] Reservation created with ID:', reservaId);
+      res.json({ 
+        ok: true, 
+        id: reservaId,
+        points: 10,
+        message: 'Reserva criada com sucesso'
+      });
+    }
+  );
+});
+
 // TI Equipamentos routes
 app.get('/api/ti/solicitacoes', requireAuth, (req, res) => {
   console.log('[TI-GET] Loading equipment requests...');
@@ -477,6 +671,35 @@ app.post('/api/ti/solicitacoes', requireAuth, (req, res) => {
         points: 4,
         message: 'Solicitação criada com sucesso'
       });
+    }
+  );
+});
+
+app.patch('/api/ti/solicitacoes/:id', requireAuth, requireRole('ti', 'admin'), (req, res) => {
+  console.log('[TI-PATCH] Updating TI request:', req.params.id);
+  
+  const { status } = req.body;
+  const requestId = req.params.id;
+  
+  if (!status) {
+    return res.status(400).json({ ok: false, error: 'Status é obrigatório' });
+  }
+
+  db.run(
+    'UPDATE ti_solicitacoes SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+    [status, requestId],
+    function(err) {
+      if (err) {
+        console.error('[TI-PATCH] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Solicitação não encontrada' });
+      }
+      
+      console.log('[TI-PATCH] Request updated:', requestId);
+      res.json({ ok: true, message: 'Status atualizado com sucesso' });
     }
   );
 });
@@ -558,6 +781,181 @@ app.post('/api/trocas-proteina/bulk', requireAuth, (req, res) => {
       }
     );
   });
+});
+
+// Portaria routes
+app.get('/api/portaria/agendamentos', requireAuth, (req, res) => {
+  console.log('[PORTARIA-GET] Loading appointments...');
+  
+  db.all(
+    'SELECT * FROM portaria_agendamentos ORDER BY data, hora',
+    (err, rows) => {
+      if (err) {
+        console.error('[PORTARIA-GET] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[PORTARIA-GET] Found', rows.length, 'appointments');
+      res.json({ ok: true, agendamentos: rows || [] });
+    }
+  );
+});
+
+app.post('/api/portaria/agendamentos', requireAuth, (req, res) => {
+  console.log('[PORTARIA-POST] Creating appointment:', req.body);
+  
+  const { data, hora, visitante, documento, observacao } = req.body;
+  const userId = req.user.id;
+  
+  if (!data || !hora || !visitante) {
+    return res.status(400).json({ ok: false, error: 'Data, hora e visitante são obrigatórios' });
+  }
+
+  const agendamentoId = `agenda_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  
+  db.run(
+    `INSERT INTO portaria_agendamentos (id, user_id, data, hora, visitante, documento, observacao) 
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [agendamentoId, userId, data, hora, visitante, documento || '', observacao || ''],
+    function(err) {
+      if (err) {
+        console.error('[PORTARIA-POST] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[PORTARIA-POST] Appointment created with ID:', agendamentoId);
+      res.json({ 
+        ok: true, 
+        id: agendamentoId,
+        points: 6,
+        message: 'Agendamento criado com sucesso'
+      });
+    }
+  );
+});
+
+// Admin routes
+app.get('/api/admin/users', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  console.log('[ADMIN-GET-USERS] Loading users...');
+  
+  db.all(
+    'SELECT id, nome, email, setor, role, ativo, created_at FROM usuarios ORDER BY nome',
+    (err, rows) => {
+      if (err) {
+        console.error('[ADMIN-GET-USERS] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[ADMIN-GET-USERS] Found', rows.length, 'users');
+      res.json({ ok: true, users: rows || [] });
+    }
+  );
+});
+
+app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
+  console.log('[ADMIN-POST-USER] Creating user:', req.body.email);
+  
+  const { nome, email, senha, setor, role } = req.body;
+  
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ ok: false, error: 'Nome, email e senha são obrigatórios' });
+  }
+
+  const userId = `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const hashedPassword = bcrypt.hashSync(senha, 10);
+  
+  db.run(
+    `INSERT INTO usuarios (id, nome, email, senha, setor, role) 
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [userId, nome, email, hashedPassword, setor || 'Geral', role || 'colaborador'],
+    function(err) {
+      if (err) {
+        console.error('[ADMIN-POST-USER] Database error:', err);
+        if (err.message.includes('UNIQUE constraint failed')) {
+          return res.status(400).json({ ok: false, error: 'Email já existe' });
+        }
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      console.log('[ADMIN-POST-USER] User created with ID:', userId);
+      res.json({ 
+        ok: true, 
+        id: userId,
+        message: 'Usuário criado com sucesso'
+      });
+    }
+  );
+});
+
+app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), (req, res) => {
+  console.log('[ADMIN-PATCH-USER] Updating user:', req.params.id);
+  
+  const { nome, email, setor, role, ativo } = req.body;
+  const userId = req.params.id;
+  
+  const updates = [];
+  const values = [];
+  
+  if (nome !== undefined) { updates.push('nome = ?'); values.push(nome); }
+  if (email !== undefined) { updates.push('email = ?'); values.push(email); }
+  if (setor !== undefined) { updates.push('setor = ?'); values.push(setor); }
+  if (role !== undefined) { updates.push('role = ?'); values.push(role); }
+  if (ativo !== undefined) { updates.push('ativo = ?'); values.push(ativo ? 1 : 0); }
+  
+  if (updates.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+  }
+  
+  values.push(userId);
+  
+  db.run(
+    `UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`,
+    values,
+    function(err) {
+      if (err) {
+        console.error('[ADMIN-PATCH-USER] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
+      }
+      
+      console.log('[ADMIN-PATCH-USER] User updated:', userId);
+      res.json({ ok: true, message: 'Usuário atualizado com sucesso' });
+    }
+  );
+});
+
+app.patch('/api/admin/users/:id/password', requireAuth, requireRole('admin'), (req, res) => {
+  console.log('[ADMIN-RESET-PASSWORD] Resetting password for user:', req.params.id);
+  
+  const { senha } = req.body;
+  const userId = req.params.id;
+  
+  if (!senha) {
+    return res.status(400).json({ ok: false, error: 'Nova senha é obrigatória' });
+  }
+
+  const hashedPassword = bcrypt.hashSync(senha, 10);
+  
+  db.run(
+    'UPDATE usuarios SET senha = ? WHERE id = ?',
+    [hashedPassword, userId],
+    function(err) {
+      if (err) {
+        console.error('[ADMIN-RESET-PASSWORD] Database error:', err);
+        return res.status(500).json({ ok: false, error: 'Database error' });
+      }
+      
+      if (this.changes === 0) {
+        return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
+      }
+      
+      console.log('[ADMIN-RESET-PASSWORD] Password reset for user:', userId);
+      res.json({ ok: true, message: 'Senha alterada com sucesso' });
+    }
+  );
 });
 
 // Error handling middleware

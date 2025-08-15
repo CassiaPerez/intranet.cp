@@ -81,7 +81,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       // Try API call as fallback
       try {
-        const response = await fetch(`${API_BASE}/api/me`, {
+        const response = await fetch('/api/me', {
           credentials: 'include'
         });
         
@@ -149,7 +149,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       // Clear localStorage first
       localStorage.removeItem('currentUser');
       
-      await fetch(`${API_BASE}/auth/logout`, {
+      await fetch('/auth/logout', {
         method: 'POST',
         credentials: 'include'
       });

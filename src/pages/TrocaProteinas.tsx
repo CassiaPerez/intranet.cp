@@ -238,7 +238,7 @@ export const TrocaProteinas: React.FC = () => {
     try {
       console.log('[TROCAS] Saving', payload.length, 'exchanges to API...');
       
-      const response = await fetch(`${API_BASE}/api/trocas-proteina/bulk`, {
+      const response = await fetch('/api/trocas-proteina/bulk', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -274,8 +274,8 @@ export const TrocaProteinas: React.FC = () => {
       // Reload existing exchanges
       const from = format(startOfMonth(hoje), 'yyyy-MM-01');
       const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
-      const reloadRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, { 
-        credentials: 'include',
+      const reloadRes = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { 
+      const prevRes = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { 
       });
       
       if (reloadRes.ok) {

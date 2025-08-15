@@ -62,7 +62,7 @@ export const ReservaSalas: React.FC = () => {
 
   const loadReservations = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/reservas`, { credentials: 'include' });
+      const response = await fetch('/api/reservas', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         const formattedEvents = (data.reservas || []).map((reserva: any) => {
@@ -95,7 +95,7 @@ export const ReservaSalas: React.FC = () => {
 
   const loadAgendamentos = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, { credentials: 'include' });
+      const response = await fetch('/api/portaria/agendamentos', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
         setAgendamentos(data.agendamentos || []);
@@ -139,7 +139,7 @@ export const ReservaSalas: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/reservas`, {
+      const response = await fetch('/api/reservas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -190,7 +190,7 @@ export const ReservaSalas: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE}/api/portaria/agendamentos`, {
+      const response = await fetch('/api/portaria/agendamentos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',

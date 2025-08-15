@@ -134,7 +134,7 @@ const Equipamentos: React.FC = () => {
         path = `/api/ti/minhas?email=${email}`;
       }
 
-      const url = `${BASE_API}${path}`;
+      const url = path;
       const response = await fetch(url, {
         credentials: 'include',
       });
@@ -192,7 +192,7 @@ const Equipamentos: React.FC = () => {
 
     setSubmitting(true);
     try {
-      const url = `${BASE_API}/api/ti/solicitacoes`;
+      const url = '/api/ti/solicitacoes';
       const res = await fetch(url, {
         method: 'POST',
         headers: {
