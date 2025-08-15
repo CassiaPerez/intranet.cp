@@ -390,6 +390,7 @@ const requireAuth = (req, res, next) => {
     const decoded = jwt.verify(token, JWT_SECRET);
     console.log('[AUTH] ✅ Token valid for user:', decoded.email);
     req.user = decoded;
+    req.token = token; // Store raw token for /api/me endpoint
     next();
   } catch (error) {
     console.log('[AUTH] ❌ Token verification failed:', error.message);
@@ -558,7 +559,8 @@ app.get('/api/me', requireAuth, (req, res) => {
   console.log('[ME] User info request:', req.user);
   res.json({
     ok: true,
-    user: req.user
+    user: req.user,
+    token: req.token // Include token in response
   });
 });
 
