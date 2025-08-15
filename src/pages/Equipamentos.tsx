@@ -26,16 +26,6 @@ interface EquipmentRequest {
  */
 const BASE_API = (import.meta.env.VITE_API_URL?.replace(/\/+$/, '') || '');
 
-function authHeaders(user?: any) {
-  const h: Record<string, string> = { Accept: 'application/json' };
-  const token =
-    user?.token ||
-    user?.accessToken ||
-    user?.jwt ||
-    (typeof localStorage !== 'undefined' ? localStorage.getItem('token') : '');
-  if (token) h['Authorization'] = `Bearer ${token}`;
-  return h;
-}
 
 /** ========= Utils ========= */
 function uid() {
@@ -147,7 +137,7 @@ const Equipamentos: React.FC = () => {
       const url = `${BASE_API}${path}`;
       const response = await fetch(url, {
         credentials: 'include',
-        headers: authHeaders(user),
+        headers: getAuthHeaders(user),
       });
 
       if (!response.ok) {
@@ -206,10 +196,7 @@ const Equipamentos: React.FC = () => {
       const url = `${BASE_API}/api/ti/solicitacoes`;
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...authHeaders(user),
-        },
+        headers: getAuthHeadersWithJson(user),
         credentials: 'include',
         body: JSON.stringify({
           titulo: equipmentName,

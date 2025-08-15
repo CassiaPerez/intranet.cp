@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import toast from 'react-hot-toast';
+import { getAuthHeaders, getAuthHeadersWithJson } from '../utils/authUtils';
 
 const API_BASE = '';
 
@@ -49,7 +50,8 @@ export const Mural: React.FC = () => {
       setLoading(true);
       console.log('[MURAL] Loading posts...');
       const response = await fetch(`${API_BASE}/api/mural/posts`, {
-        credentials: 'include'
+        credentials: 'include',
+        headers: getAuthHeaders(user)
       });
 
       if (!response.ok) {
@@ -80,9 +82,7 @@ export const Mural: React.FC = () => {
       console.log('[MURAL] Creating post:', newPost);
       const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeadersWithJson(user),
         credentials: 'include',
         body: JSON.stringify(newPost),
       });
@@ -112,6 +112,7 @@ export const Mural: React.FC = () => {
       console.log('[MURAL] Processing like for post:', postId);
       const response = await fetch(`${API_BASE}/api/rh/mural/${postId}/like`, {
         method: 'POST',
+        headers: getAuthHeaders(user),
         credentials: 'include',
       });
 
@@ -144,9 +145,7 @@ export const Mural: React.FC = () => {
       console.log('[MURAL] Creating comment for post:', postId);
       const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: getAuthHeadersWithJson(user),
         credentials: 'include',
         body: JSON.stringify({ texto: commentText.trim() }),
       });

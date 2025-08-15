@@ -10,6 +10,7 @@ interface User {
   setor: string;
   role: string;
   avatar?: string;
+  token?: string;
 }
 
 interface AuthContextType {
@@ -105,6 +106,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                   } else {
                     data.user.role = 'colaborador';
                   }
+                }
+                // Preserve token if returned by API
+                if (data.token) {
+                  data.user.token = data.token;
                 }
                 console.log('API user data normalized:', data.user);
               }
