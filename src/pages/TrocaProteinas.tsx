@@ -6,6 +6,7 @@ import { Save, Repeat } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import { useGamification } from '../contexts/GamificationContext';
+import { getAuthHeadersWithJson } from '../utils/authUtils';
 
 const PROTEIN_OPTIONS = ['Frango','Omelete','Ovo frito','Ovo cozido'] as const;
 type ProteinLabel = typeof PROTEIN_OPTIONS[number];
@@ -112,7 +113,7 @@ export const TrocaProteinas: React.FC = () => {
         const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
         console.log('[TROCAS] Loading existing exchanges from API...');
         const prevRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, { 
-          credentials: 'include',
+          headers: getAuthHeadersWithJson(user),
         });
         
         if (prevRes.ok) {
@@ -301,10 +302,7 @@ export const TrocaProteinas: React.FC = () => {
       
       const response = await fetch('/api/trocas-proteina/bulk', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+        headers: getAuthHeadersWithJson(user),
         body: JSON.stringify({ trocas: payload }),
       });
       
@@ -336,7 +334,7 @@ export const TrocaProteinas: React.FC = () => {
       const from = format(startOfMonth(hoje), 'yyyy-MM-01');
       const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
       const reloadRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, {
-        credentials: 'include',
+        headers: getAuthHeadersWithJson(user),
       });
       
       if (reloadRes.ok) {

@@ -4,6 +4,7 @@ import { Monitor, Smartphone, Mouse, Keyboard, Headphones, Printer, Send, CheckC
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 import { useGamification } from '../contexts/GamificationContext';
+import { getAuthHeadersWithJson } from '../utils/authUtils';
 
 /** ========= Tipos ========= */
 type Priority = 'low' | 'medium' | 'high';
@@ -136,7 +137,7 @@ const Equipamentos: React.FC = () => {
 
       const url = path;
       const response = await fetch(url, {
-        credentials: 'include',
+        headers: getAuthHeadersWithJson(user),
       });
 
       if (!response.ok) {
@@ -195,10 +196,7 @@ const Equipamentos: React.FC = () => {
       const url = '/api/ti/solicitacoes';
       const res = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
+        headers: getAuthHeadersWithJson(user),
         body: JSON.stringify({
           titulo: equipmentName,
           descricao: `Prioridade: ${formData.priority}\nJustificativa: ${formData.justification}`,
