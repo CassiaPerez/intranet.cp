@@ -15,6 +15,7 @@ const JWT_SECRET = 'your-secret-key-change-in-production';
 // Database setup
 const DB_PATH = path.join(__dirname, 'data', 'database.sqlite');
 console.log('[SERVER] Database path:', DB_PATH);
+console.log('[SERVER] Database exists:', fs.existsSync(DB_PATH));
 
 // Ensure data directory exists
 const dataDir = path.dirname(DB_PATH);
