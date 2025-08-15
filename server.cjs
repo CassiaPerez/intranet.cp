@@ -39,11 +39,11 @@ const createDemoUsers = () => {
     console.log('[DEMO] Creating demo users...');
     
     const users = [
-      { id: 'super-admin', nome: 'Super Admin', email: 'admin', senha: 'admin', setor: 'TI', role: 'admin' },
-      { id: 'admin-1', nome: 'Administrador', email: 'admin@grupocropfield.com.br', senha: 'admin123', setor: 'TI', role: 'admin' },
-      { id: 'rh-1', nome: 'RH Manager', email: 'rh@grupocropfield.com.br', senha: 'rh123', setor: 'RH', role: 'rh' },
-      { id: 'user-1', nome: 'Usuário Teste', email: 'user@grupocropfield.com.br', senha: 'user123', setor: 'Geral', role: 'colaborador' },
-      { id: 'user-2', nome: 'Usuário', email: 'user', senha: 'user', setor: 'Geral', role: 'colaborador' },
+      { id: 'super-admin', username: 'admin', nome: 'Super Admin', email: null, senha: 'admin', setor: 'TI', role: 'admin' },
+      { id: 'admin-1', username: 'administrador', nome: 'Administrador', email: 'admin@grupocropfield.com.br', senha: 'admin123', setor: 'TI', role: 'admin' },
+      { id: 'rh-1', username: 'rh', nome: 'RH Manager', email: 'rh@grupocropfield.com.br', senha: 'rh123', setor: 'RH', role: 'rh' },
+      { id: 'user-1', username: 'usuario', nome: 'Usuário Teste', email: 'user@grupocropfield.com.br', senha: 'user123', setor: 'Geral', role: 'colaborador' },
+      { id: 'user-2', username: 'user', nome: 'Usuário', email: null, senha: 'user', setor: 'Geral', role: 'colaborador' },
     ];
     
     let processed = 0;
@@ -52,14 +52,14 @@ const createDemoUsers = () => {
       const hashedPassword = bcrypt.hashSync(user.senha, 10);
       
       db.run(
-        `INSERT OR REPLACE INTO usuarios (id, nome, email, senha, setor, role, ativo)
-         VALUES (?, ?, ?, ?, ?, ?, 1)`,
-        [user.id, user.nome, user.email, hashedPassword, user.setor, user.role],
+        `INSERT OR REPLACE INTO usuarios (id, username, nome, email, senha, setor, role, ativo)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+        [user.id, user.username, user.nome, user.email, hashedPassword, user.setor, user.role],
         function(err) {
           if (err) {
-            console.error(`[DEMO] Error creating user ${user.email}:`, err);
+            console.error(`[DEMO] Error creating user ${user.username}:`, err);
           } else {
-            console.log(`[DEMO] ✅ User created: ${user.email} (${user.nome}) - Role: ${user.role}`);
+            console.log(`[DEMO] ✅ User created: ${user.username} (${user.nome}) - Role: ${user.role}`);
           }
           
           processed++;
@@ -81,8 +81,9 @@ db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS usuarios (
       id TEXT PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
       nome TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
+      email TEXT UNIQUE,
       senha TEXT NOT NULL,
       setor TEXT DEFAULT 'Geral',
       role TEXT DEFAULT 'colaborador',
@@ -324,32 +325,34 @@ const requireRole = (...roles) => {
 };
 
 // Auth routes
-app.post('/auth/login', async (req, res) => {
-  console.log('[LOGIN] Login attempt:', req.body.email);
+app.post('/auth/login', (req, res) => {
+  console.log('[LOGIN] Login attempt:', req.body.username || req.body.email);
   
-  const { email, password } = req.body;
+  const { username, email, password } = req.body;
+  const loginField = username || email; // username tem prioridade
   
-  if (!email || !password) {
-    console.log('[LOGIN] Missing email or password');
-    return res.status(400).json({ ok: false, error: 'Email and password required' });
+  if (!loginField || !password) {
+    console.log('[LOGIN] Missing username/email or password');
+    return res.status(400).json({ ok: false, error: 'Username e senha são obrigatórios' });
   }
 
   try {
-    console.log('[LOGIN] Querying database for user:', email);
+    console.log('[LOGIN] Querying database for user:', loginField);
     // Query user from database
+    // Primeiro tenta por username, depois por email (para compatibilidade com Google)
     db.get(
-      'SELECT * FROM usuarios WHERE email = ? AND ativo = 1',
-      [email],
-      async (err, user) => {
+      'SELECT * FROM usuarios WHERE (username = ? OR email = ?) AND ativo = 1',
+      [loginField, loginField],
+      (err, user) => {
         if (err) {
           console.error('[LOGIN] Database error:', err);
           return res.status(500).json({ ok: false, error: 'Database error' });
         }
 
         if (!user) {
-          console.log('[LOGIN] User not found:', email);
+          console.log('[LOGIN] User not found:', loginField);
           console.log('[LOGIN] Available users debug - querying all users...');
-          db.all('SELECT email, nome, role FROM usuarios WHERE ativo = 1', (debugErr, debugUsers) => {
+          db.all('SELECT username, email, nome, role FROM usuarios WHERE ativo = 1', (debugErr, debugUsers) => {
             if (!debugErr) {
               console.log('[LOGIN] Available users:', debugUsers);
             }
@@ -357,15 +360,20 @@ app.post('/auth/login', async (req, res) => {
           return res.status(401).json({ ok: false, error: 'Invalid credentials' });
         }
 
-        console.log('[LOGIN] User found:', user.email, 'Role:', user.role, 'Setor:', user.setor);
+        console.log('[LOGIN] User found:', user.username, 'Email:', user.email, 'Role:', user.role, 'Setor:', user.setor);
         
         // Check password
         console.log('[LOGIN] Checking password...');
-        const isValid = await bcrypt.compare(password, user.senha);
+        bcrypt.compare(password, user.senha, (bcryptErr, isValid) => {
+          if (bcryptErr) {
+            console.error('[LOGIN] Bcrypt error:', bcryptErr);
+            return res.status(500).json({ ok: false, error: 'Password verification error' });
+          }
+        
         console.log('[LOGIN] Password valid:', isValid);
         
         if (!isValid) {
-          console.log('[LOGIN] Invalid password for:', email);
+            console.log('[LOGIN] Invalid password for:', loginField);
           return res.status(401).json({ ok: false, error: 'Invalid credentials' });
         }
 
@@ -374,6 +382,7 @@ app.post('/auth/login', async (req, res) => {
         const token = jwt.sign(
           { 
             id: user.id,
+            username: user.username,
             name: user.nome,
             email: user.email,
             setor: user.setor,
@@ -393,12 +402,13 @@ app.post('/auth/login', async (req, res) => {
           maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
         });
 
-        console.log('[LOGIN] Login successful for:', email);
+          console.log('[LOGIN] Login successful for:', loginField);
         
         res.json({
           ok: true,
           user: {
             id: user.id,
+            username: user.username,
             name: user.nome,
             email: user.email,
             sector: user.setor,
@@ -407,6 +417,7 @@ app.post('/auth/login', async (req, res) => {
             avatar: user.avatar_url
           },
           token
+        });
         });
       }
     );
