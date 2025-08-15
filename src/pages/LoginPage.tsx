@@ -31,28 +31,6 @@ export const LoginPage: React.FC = () => {
 
     setLoading(true);
     
-    // Check hardcoded credentials first (for demo purposes)
-    const demoUsers = [
-      { id: '1', email: 'admin@grupocropfield.com.br', password: 'admin123', name: 'Administrador', sector: 'TI', setor: 'TI', role: 'admin', avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150', token: 'demo-token-admin' },
-      { id: '2', email: 'rh@grupocropfield.com.br', password: 'rh123', name: 'RH Manager', sector: 'RH', setor: 'RH', role: 'rh', avatar: 'https://images.pexels.com/photos/774909/pexels-photo-774909.jpeg?w=150', token: 'demo-token-rh' },
-      { id: '3', email: 'user@grupocropfield.com.br', password: 'user123', name: 'Usuário Teste', sector: 'Geral', setor: 'Geral', role: 'colaborador', avatar: 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150', token: 'demo-token-user' },
-      { id: '4', email: 'admin', password: 'admin', name: 'Admin', sector: 'TI', setor: 'TI', role: 'admin', avatar: 'https://images.pexels.com/photos/2379004/pexels-photo-2379004.jpeg?w=150', token: 'demo-token-admin2' },
-      { id: '5', email: 'user', password: 'user', name: 'Usuário', sector: 'Geral', setor: 'Geral', role: 'colaborador', avatar: 'https://images.pexels.com/photos/771742/pexels-photo-771742.jpeg?w=150', token: 'demo-token-user2' },
-    ];
-
-    const demoUser = demoUsers.find(u => u.email === email && u.password === password);
-    
-    if (demoUser) {
-      // Store user in localStorage for persistence
-      localStorage.setItem('currentUser', JSON.stringify(demoUser));
-      console.log('Demo user logged in:', demoUser);
-      toast.success('Login realizado com sucesso!');
-      setLoading(false);
-      // Reload to trigger auth check
-      window.location.href = '/';
-      return;
-    }
-
     try {
       const response = await fetch('/auth/login', {
         method: 'POST',

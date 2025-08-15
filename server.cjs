@@ -159,6 +159,27 @@ db.serialize(() => {
   console.log('[SERVER] Database tables initialized');
 });
 
+// Insert demo users
+db.serialize(() => {
+  const demoUsers = [
+    { id: 'admin-1', nome: 'Administrador', email: 'admin@grupocropfield.com.br', senha: 'admin123', setor: 'TI', role: 'admin' },
+    { id: 'rh-1', nome: 'RH Manager', email: 'rh@grupocropfield.com.br', senha: 'rh123', setor: 'RH', role: 'rh' },
+    { id: 'user-1', nome: 'Usuário Teste', email: 'user@grupocropfield.com.br', senha: 'user123', setor: 'Geral', role: 'colaborador' },
+    { id: 'admin-2', nome: 'Admin', email: 'admin', senha: 'admin', setor: 'TI', role: 'admin' },
+    { id: 'user-2', nome: 'Usuário', email: 'user', senha: 'user', setor: 'Geral', role: 'colaborador' },
+  ];
+
+  for (const user of demoUsers) {
+    const hashedPassword = bcrypt.hashSync(user.senha, 10);
+    db.run(`
+      INSERT OR IGNORE INTO usuarios (id, nome, email, senha, setor, role)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [user.id, user.nome, user.email, hashedPassword, user.setor, user.role]);
+  }
+  
+  console.log('[SERVER] Demo users inserted');
+});
+
 // Middleware
 app.use(morgan('combined'));
 app.use(express.json());
