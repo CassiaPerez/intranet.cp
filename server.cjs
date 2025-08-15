@@ -325,18 +325,9 @@ const initializeDatabase = () => {
       checkAllTablesReady();
     }
   });
-  
-  console.log('[SERVER] Database tables setup initiated');
 };
-
-// Initialize database in a safe way
-db.serialize(() => {
-  try {
-    initializeDatabase();
-  } catch (error) {
-    console.error('[DB] ❌ Error during database initialization:', error.message);
-  }
-});
+  
+console.log('[SERVER] Database tables setup initiated');
 
 // Middleware
 app.use(morgan('combined'));
@@ -1217,86 +1208,25 @@ app.get('/api/debug/users', (req, res) => {
 });
 
 // Start server
-const server = app.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`[SERVER] Server running on http://localhost:${PORT}`);
   console.log(`[SERVER] Database: ${DB_PATH}`);
   console.log(`[SERVER] Demo mode: ${!!process.env.DEMO_MODE || true}`);
-  console.log(`[SERVER] Process ID: ${process.pid}`);
   
-  // Health check endpoint for monitoring
-  setTimeout(() => {
-    console.log('[SERVER] ✅ Server health check passed');
+  // Initialize database
+  initializeDatabase();
+  
+  // Force create demo users after server starts
+  setTimeout(async () => {
+    console.log('[SERVER] Forcing demo users creation...');
+    await createDemoUsers();
     
-    // Check if database is working
-    db.get('SELECT COUNT(*) as count FROM usuarios', (err, result) => {
-      if (err) {
-        console.error('[SERVER] ❌ Database health check failed:', err.message);
-      } else {
-        console.log(`[SERVER] ✅ Database health check passed - ${result.count} users`);
-      }
-    });
-  }, 3000);
-});
-
-// Handle server errors
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`[SERVER] ❌ Port ${PORT} is already in use`);
-    console.error(`[SERVER] Try: killall node or lsof -ti:${PORT} | xargs kill`);
-  } else {
-    console.error('[SERVER] ❌ Server error:', error.message);
-  }
-});
-
-// Add connection timeout
-server.timeout = 30000; // 30 seconds
-
-// Handle server close
-server.on('close', () => {
-  console.log('[SERVER] 🔴 Server closed');
-});
-
-// Improved graceful shutdown
-const gracefulShutdown = (signal) => {
-  console.log(`\n[SERVER] 🛑 ${signal} received, shutting down gracefully...`);
-  
-  server.close(() => {
-    console.log('[SERVER] ✅ HTTP server closed');
-    
-    db.close((err) => {
-      if (err) {
-        console.error('[SERVER] ❌ Error closing database:', err.message);
-        process.exit(1);
-      } else {
-        console.log('[SERVER] ✅ Database connection closed');
-        console.log('[SERVER] 👋 Goodbye!');
-        process.exit(0);
-      }
-    });
-  });
-  
-  // Force exit after 10 seconds
-  setTimeout(() => {
-    console.error('[SERVER] ⏰ Forced shutdown after timeout');
-    process.exit(1);
-  }, 10000);
-};
-
-// Listen for shutdown signals
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-
-// Handle process exit
-process.on('exit', (code) => {
-  console.log(`[SERVER] 🏁 Process exiting with code: ${code}`);
-});
-
-console.log('[SERVER] 🚀 Initialization complete');
-console.log('[SERVER] 📝 Available endpoints:');
-console.log('[SERVER]   - POST /auth/login');
-console.log('[SERVER]   - GET /api/me');
-console.log('[SERVER]   - GET /api/debug/users');
-console.log('[SERVER]   - POST /api/debug/recreate-users');
+    // Verify users exist
+    db.all('SELECT email, nome, role, setor FROM usuarios WHERE ativo = 1', (err, users) => {
+      if (!err && users) {
+        console.log(`[SERVER] ✅ Available demo users: ${users.length}`);
+        users.forEach(user => {
+          console.log(`  - ${user.email} (${user.nome}) - Role: ${user.role} - Setor: ${user.setor}`);
         });
         console.log('[SERVER] 🎯 Try logging in with: admin / admin');
       }
