@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run server\" \"vite\"",
     "dev:safe": "npm run clean:db && npm run dev",
+    "dev:frontend": "vite",
     "clean:db": "rm -f data/database.sqlite*",
-    "dev:full": "concurrently \"npm run dev\" \"npm run server\"",
+    "dev:full": "concurrently \"npm run server\" \"npm run dev:frontend\"",
     "dev:backend": "node server.cjs",
     "dev:separate": "echo 'Run: npm run dev (terminal 1) && npm run dev:backend (terminal 2)'",
     "build": "vite build",

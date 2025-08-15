@@ -1303,9 +1303,9 @@ app.get('/api/debug/users', (req, res) => {
 
 // Start server
 const server = app.listen(PORT, () => {
-  console.log(`[SERVER] Server running on http://localhost:${PORT}`);
+  console.log(`[SERVER] 🚀 Backend server running on http://localhost:${PORT}`);
   console.log(`[SERVER] Database: ${DB_PATH}`);
-  console.log(`[SERVER] Demo mode: ${!!process.env.DEMO_MODE || true}`);
+  console.log(`[SERVER] 🎯 Ready to receive API requests`);
   console.log(`[SERVER] Process ID: ${process.pid}`);
   
   // Health check endpoint for monitoring
