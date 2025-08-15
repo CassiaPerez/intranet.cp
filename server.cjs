@@ -24,6 +24,10 @@ const PORT = process.env.PORT || 3005; // << porta da API
 // Load environment variables
 require('dotenv').config();
 
+// Demo mode configuration
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+console.log('Demo mode:', DEMO_MODE ? 'ENABLED' : 'DISABLED');
+
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-change-in-production';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -168,12 +172,20 @@ async function createSchema() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       titulo TEXT NOT NULL,
       descricao TEXT,
-      status TEXT DEFAULT 'pendente',
+      status TEXT DEFAULT 'pendente' CHECK(status IN ('pendente','em_analise','aprovada','rejeitada','concluida')),
       solicitante_id INTEGER NOT NULL,
       responsavel_id INTEGER,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+
+    // Add missing indexes for better performance
+    await run("CREATE INDEX IF NOT EXISTS idx_ti_solicitacoes_status ON ti_solicitacoes(status)");
+    await run("CREATE INDEX IF NOT EXISTS idx_ti_solicitacoes_solicitante ON ti_solicitacoes(solicitante_id)");
+    await run("CREATE INDEX IF NOT EXISTS idx_mural_posts_created_at ON mural_posts(created_at DESC)");
+    await run("CREATE INDEX IF NOT EXISTS idx_pontos_user_created ON pontos(user_id, created_at)");
+    await run("CREATE INDEX IF NOT EXISTS idx_reservas_data_sala ON reservas(data, sala)");
+    await run("CREATE INDEX IF NOT EXISTS idx_trocas_user_data ON trocas_proteina(user_id, data)");
 
     // System settings table
     await run(`CREATE TABLE IF NOT EXISTS system_settings(
@@ -261,9 +273,9 @@ async function createSchema() {
     if (!hasUserId) await run("ALTER TABLE trocas_proteina ADD COLUMN user_id INTEGER");
     if (!hasData) await run("ALTER TABLE trocas_proteina ADD COLUMN data DATE");
 
-    console.log('Schema criado/verificado com sucesso');
+    console.log('[SCHEMA] Schema criado/verificado com sucesso');
   } catch (e) {
-    console.error('Erro ao criar schema:', e);
+    console.error('[SCHEMA] Erro ao criar schema:', e);
     throw e; // Re-throw to prevent server from starting with broken database
   }
 }
@@ -274,20 +286,23 @@ async function createSchema() {
 function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user) {
+      console.log('[ROLE] User not authenticated for roles:', roles);
       return res.status(401).json({ ok: false, error: 'Não autenticado' });
     }
     
-    console.log('Role check - User:', req.user.email, 'Role:', req.user.role, 'Required:', roles);
+    console.log('[ROLE] Role check - User:', req.user.email, 'Role:', req.user.role, 'Required:', roles);
     
     // Admin has access to everything
     if (req.user.role === 'admin' || req.user.email === 'admin@grupocropfield.com.br') {
+      console.log('[ROLE] Admin access granted');
       return next();
     }
     
     if (!roles.includes(req.user.role)) {
-      console.log('Access denied - User role:', req.user.role, 'Required roles:', roles);
+      console.log('[ROLE] Access denied - User role:', req.user.role, 'Required roles:', roles);
       return res.status(403).json({ ok: false, error: 'Acesso negado' });
     }
+    console.log('[ROLE] Role access granted');
     next();
   };
 }
@@ -301,9 +316,9 @@ async function registrarPontos(user_id, acao, pontos, meta = null) {
       "INSERT INTO pontos(user_id, acao, pontos, meta) VALUES(?, ?, ?, ?)",
       [user_id, acao, pontos, meta ? JSON.stringify(meta) : null]
     );
-    console.log(`Pontos registrados: ${acao} = +${pontos} para user ${user_id}`);
+    console.log(`[POINTS] Pontos registrados: ${acao} = +${pontos} para user ${user_id}`);
   } catch (e) {
-    console.error('Erro ao registrar pontos:', e);
+    console.error('[POINTS] Erro ao registrar pontos:', e);
   }
 }
 
@@ -347,29 +362,61 @@ if (GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) {
 // -------------------------------------------------------------
 function authMiddleware(req, res, next) {
   const token = req.cookies.sid;
-  if (!token) { req.userId = 1; return next(); } // demo user
+  if (!token) { 
+    if (DEMO_MODE) {
+      req.userId = 1; 
+      console.log('[AUTH] Demo mode: using demo user ID 1');
+      return next();
+    } else {
+      // For non-demo mode, require authentication for protected routes
+      if (req.path.startsWith('/api/') && !req.path.match(/\/(health|contatos|cardapio)/)) {
+        console.log('[AUTH] No token provided for protected route:', req.path);
+        return res.status(401).json({ ok: false, error: 'Authentication required' });
+      }
+      req.userId = null;
+      return next();
+    }
+  }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.sub;
+    console.log('[AUTH] Token validated for user ID:', req.userId);
     next();
   } catch {
-    req.userId = 1; // demo user
+    console.log('[AUTH] Invalid token');
+    if (DEMO_MODE) {
+      req.userId = 1; // demo user
+    } else {
+      req.userId = null;
+    }
     next();
   }
 }
 
 async function getUserMiddleware(req, res, next) {
-  if (!req.userId) req.userId = 1;
+  if (!req.userId) {
+    if (DEMO_MODE) {
+      req.userId = 1;
+    } else {
+      req.user = null;
+      return next();
+    }
+  }
+  
   try {
     const user = await get("SELECT * FROM usuarios WHERE id = ? AND ativo = 1", [req.userId]);
     if (!user) {
-      // Check for demo users
-      const demoUser = req.userId === 1 ? 
-        { id: 1, nome: 'Administrador', email: 'admin@grupocropfield.com.br', setor: 'TI', role: 'admin' } :
-        { id: req.userId, nome: 'Usuário Demo', email: 'demo@grupocropfield.com.br', setor: 'Geral', role: 'colaborador' };
-      req.user = demoUser;
-      return next();
+      if (DEMO_MODE && req.userId === 1) {
+        // Check for demo users only in demo mode
+        const demoUser = { id: 1, nome: 'Administrador', email: 'admin@grupocropfield.com.br', setor: 'TI', role: 'admin' };
+        req.user = demoUser;
+        console.log('[USER] Using demo admin user');
+        return next();
+      } else {
+        req.user = null;
+        return next();
+      }
     }
     
     // Ensure role is set for database users
@@ -384,10 +431,14 @@ async function getUserMiddleware(req, res, next) {
     }
     
     req.user = user;
-    console.log('User middleware - User:', user.email, 'Role:', user.role);
+    console.log('[USER] User loaded:', user.email, 'Role:', user.role, 'Setor:', user.setor);
     next();
   } catch {
-    req.user = { id: 1, nome: 'Administrador', email: 'admin@grupocropfield.com.br', setor: 'TI', role: 'admin' };
+    if (DEMO_MODE) {
+      req.user = { id: 1, nome: 'Administrador', email: 'admin@grupocropfield.com.br', setor: 'TI', role: 'admin' };
+    } else {
+      req.user = null;
+    }
     next();
   }
 }
@@ -566,6 +617,7 @@ app.get('/api/pontos/ranking', async (_req, res) => {
 // Users management
 app.get('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
   try {
+    console.log('[ADMIN] Loading users for admin panel');
     const users = await all(`
       SELECT u.id, u.nome, u.email, u.setor, u.role, u.ativo, u.created_at,
              COALESCE(SUM(p.pontos), 0) as total_pontos_mensal
@@ -575,9 +627,10 @@ app.get('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admi
       GROUP BY u.id
       ORDER BY u.created_at DESC
     `);
+    console.log('[ADMIN] Loaded', users.length, 'users');
     res.json({ ok: true, users });
   } catch (error) {
-    console.error('Erro ao buscar usuários:', error);
+    console.error('[ADMIN] Erro ao buscar usuários:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar usuários' });
   }
 });
@@ -593,10 +646,12 @@ async function ensureDefaultAdmin() {
         "INSERT OR IGNORE INTO usuarios(nome, email, setor, role, senha_hash, ativo) VALUES(?, ?, ?, ?, ?, 1)",
         ['Administrador', 'admin@grupocropfield.com.br', 'TI', 'admin', hashedPassword]
       );
-      console.log('Default admin user created: admin@grupocropfield.com.br / admin123');
+      console.log('[ADMIN] Default admin user created: admin@grupocropfield.com.br / admin123');
+    } else {
+      console.log('[ADMIN] Default admin user already exists');
     }
   } catch (error) {
-    console.error('Error creating default admin:', error);
+    console.error('[ADMIN] Error creating default admin:', error);
     throw error; // Re-throw to prevent server from starting with broken admin setup
   }
 }
@@ -606,60 +661,67 @@ async function ensureDefaultAdmin() {
 // -------------------------------------------------------------
 async function initializeServer() {
   try {
-    console.log('Initializing database schema...');
+    console.log('[INIT] Initializing database schema...');
     await createSchema();
     
-    console.log('Setting up default admin user...');
+    console.log('[INIT] Setting up default admin user...');
     await ensureDefaultAdmin();
     
-    console.log('Database initialization complete!');
+    console.log('[INIT] Database initialization complete!');
     
     // Start the server only after successful database initialization
     app.listen(PORT, () => {
-      console.log(`Servidor rodando na porta ${PORT}`);
-      console.log(`Frontend URL: ${FRONTEND_URL}`);
-      console.log(`Google OAuth configurado: ${!!GOOGLE_CLIENT_ID}`);
+      console.log(`[INIT] ✅ Servidor rodando na porta ${PORT}`);
+      console.log(`[INIT] Frontend URL: ${FRONTEND_URL}`);
+      console.log(`[INIT] Google OAuth configurado: ${!!GOOGLE_CLIENT_ID}`);
+      console.log(`[INIT] Demo mode: ${DEMO_MODE ? 'ENABLED' : 'DISABLED'}`);
     });
     
   } catch (error) {
-    console.error('Failed to initialize server:', error);
+    console.error('[INIT] Failed to initialize server:', error);
     process.exit(1); // Exit with error code if initialization fails
   }
 }
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error('[ERROR] Unhandled Rejection at:', promise, 'reason:', reason);
   process.exit(1);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
+  console.error('[ERROR] Uncaught Exception:', error);
   process.exit(1);
 });
 
 app.post('/api/admin/users', authMiddleware, getUserMiddleware, requireRole('admin'), async (req, res) => {
   try {
     const { nome, email, setor, role, senha } = req.body;
+    console.log('[ADMIN] Creating user:', { nome, email, setor, role });
+    
     if (!nome || !email || !senha) {
+      console.log('[ADMIN] Missing required fields');
       return res.status(400).json({ ok: false, error: 'Nome, email e senha são obrigatórios' });
     }
 
     // Check if user exists
     const existing = await get("SELECT id FROM usuarios WHERE email = ?", [email]);
     if (existing) {
+      console.log('[ADMIN] User already exists:', email);
       return res.status(400).json({ ok: false, error: 'Email já está em uso' });
     }
 
     const senhaHash = await bcrypt.hash(senha, 10);
+    console.log('[ADMIN] Password hashed, creating user...');
     const result = await run(
       "INSERT INTO usuarios(nome, email, setor, role, senha_hash, ativo) VALUES(?, ?, ?, ?, ?, 1)",
       [nome, email, setor || 'Geral', role || 'colaborador', senhaHash]
     );
 
+    console.log('[ADMIN] User created with ID:', result.lastID);
     res.json({ ok: true, id: result.lastID });
   } catch (error) {
-    console.error('Erro ao criar usuário:', error);
+    console.error('[ADMIN] Erro ao criar usuário:', error);
     res.status(500).json({ ok: false, error: 'Erro ao criar usuário' });
   }
 });
@@ -893,19 +955,26 @@ app.get('/api/admin/export/reservas.csv', authMiddleware, getUserMiddleware, req
 // -------------------------------------------------------------
 app.post('/api/ti/solicitacoes', authMiddleware, getUserMiddleware, async (req, res) => {
   try {
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+    
     const { titulo, descricao } = req.body;
+    console.log('[TI] Creating request by user:', req.user.email, { titulo, descricao });
+    
     if (!titulo) {
       return res.status(400).json({ ok: false, error: 'Título é obrigatório' });
     }
 
     const result = await run(
-      "INSERT INTO ti_solicitacoes(titulo, descricao, solicitante_id) VALUES(?, ?, ?)",
-      [titulo, descricao, req.userId]
+      "INSERT INTO ti_solicitacoes(titulo, descricao, solicitante_id, status) VALUES(?, ?, ?, 'pendente')",
+      [titulo, descricao || '', req.user.id]
     );
 
+    console.log('[TI] Request created with ID:', result.lastID);
     res.json({ ok: true, id: result.lastID });
   } catch (error) {
-    console.error('Erro ao criar solicitação TI:', error);
+    console.error('[TI] Erro ao criar solicitação TI:', error);
     res.status(500).json({ ok: false, error: 'Erro ao criar solicitação TI' });
   }
 });
@@ -913,6 +982,8 @@ app.post('/api/ti/solicitacoes', authMiddleware, getUserMiddleware, async (req, 
 app.get('/api/ti/solicitacoes', authMiddleware, getUserMiddleware, requireRole('ti', 'admin'), async (req, res) => {
   try {
     const { status } = req.query;
+    console.log('[TI] Loading all requests, filter status:', status);
+    
     let sql = `
       SELECT s.*, 
              us.nome as solicitante_nome, us.email as solicitante_email,
@@ -929,9 +1000,10 @@ app.get('/api/ti/solicitacoes', authMiddleware, getUserMiddleware, requireRole('
     sql += " ORDER BY s.created_at DESC";
     
     const solicitacoes = await all(sql, params);
+    console.log('[TI] Loaded', solicitacoes.length, 'requests');
     res.json({ ok: true, solicitacoes });
   } catch (error) {
-    console.error('Erro ao buscar solicitações TI:', error);
+    console.error('[TI] Erro ao buscar solicitações TI:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar solicitações TI' });
   }
 });
@@ -941,7 +1013,9 @@ app.patch('/api/ti/solicitacoes/:id', authMiddleware, getUserMiddleware, require
     const { status } = req.body;
     const solicitacaoId = req.params.id;
 
-    if (!['pendente', 'aprovado', 'reprovado'].includes(status)) {
+    console.log('[TI] Updating request', solicitacaoId, 'to status:', status);
+    
+    if (!['pendente', 'em_analise', 'aprovada', 'rejeitada', 'concluida'].includes(status)) {
       return res.status(400).json({ ok: false, error: 'Status inválido' });
     }
 
@@ -950,15 +1024,21 @@ app.patch('/api/ti/solicitacoes/:id', authMiddleware, getUserMiddleware, require
       [status, req.userId, solicitacaoId]
     );
 
+    console.log('[TI] Request status updated successfully');
     res.json({ ok: true });
   } catch (error) {
-    console.error('Erro ao atualizar solicitação TI:', error);
+    console.error('[TI] Erro ao atualizar solicitação TI:', error);
     res.status(500).json({ ok: false, error: 'Erro ao atualizar solicitação TI' });
   }
 });
 
 app.get('/api/ti/minhas', authMiddleware, getUserMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+    
+    console.log('[TI] Loading user requests for:', req.userId);
     const solicitacoes = await all(`
       SELECT s.*, ur.nome as responsavel_nome
       FROM ti_solicitacoes s
@@ -967,9 +1047,10 @@ app.get('/api/ti/minhas', authMiddleware, getUserMiddleware, async (req, res) =>
       ORDER BY s.created_at DESC
     `, [req.userId]);
     
+    console.log('[TI] Loaded', solicitacoes.length, 'user requests');
     res.json({ ok: true, solicitacoes });
   } catch (error) {
-    console.error('Erro ao buscar minhas solicitações:', error);
+    console.error('[TI] Erro ao buscar minhas solicitações:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar minhas solicitações' });
   }
 });
@@ -1090,6 +1171,7 @@ app.get('/api/cardapio/:mes/:tipo', async (req, res) => {
 // -------------------------------------------------------------
 app.get('/api/mural/posts', async (_req, res) => {
   try {
+    console.log('[MURAL] Loading posts from database');
     const posts = await all(`
       SELECT p.*, 
         (SELECT COUNT(*) FROM mural_likes l WHERE l.post_id = p.id) as likes_count,
@@ -1097,44 +1179,91 @@ app.get('/api/mural/posts', async (_req, res) => {
       FROM mural_posts p
       ORDER BY p.pinned DESC, p.created_at DESC
     `);
+    console.log('[MURAL] Loaded', posts.length, 'posts');
     res.json({ ok: true, posts });
-  } catch {
+  } catch (error) {
+    console.error('[MURAL] Error loading posts:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar posts' });
+  }
+});
+
+app.post('/api/mural/posts', authMiddleware, getUserMiddleware, async (req, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
+    const { titulo, conteudo, pinned } = req.body;
+    if (!titulo || !conteudo) {
+      return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
+    }
+
+    // Check if user can post (RH, TI, or admin)
+    const canPost = req.user.setor === 'RH' || req.user.setor === 'TI' || req.user.role === 'admin';
+    if (!canPost) {
+      console.log('[MURAL] User cannot post:', req.user.email, req.user.setor, req.user.role);
+      return res.status(403).json({ ok: false, error: 'Apenas usuários do RH e TI podem criar posts' });
+    }
+
+    console.log('[MURAL] Creating post by user:', req.user.email);
+    const result = await run(
+      "INSERT INTO mural_posts(titulo, conteudo, author, pinned) VALUES(?, ?, ?, ?)",
+      [titulo, conteudo, req.user.nome, pinned ? 1 : 0]
+    );
+
+    console.log('[MURAL] Post created with ID:', result.lastID);
+    res.json({ ok: true, id: result.lastID });
+  } catch (error) {
+    console.error('[MURAL] Error creating post:', error);
+    res.status(500).json({ ok: false, error: 'Erro ao criar post' });
   }
 });
 
 app.post('/api/mural/:id/like', authMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
     const postId = req.params.id;
+    console.log('[MURAL] Processing like for post:', postId, 'by user:', req.userId);
     const existing = await get("SELECT * FROM mural_likes WHERE post_id = ? AND user_id = ?", [postId, req.userId]);
     if (existing) {
       await run("DELETE FROM mural_likes WHERE post_id = ? AND user_id = ?", [postId, req.userId]);
+      console.log('[MURAL] Like removed');
       res.json({ ok: true, action: 'unliked' });
     } else {
       await run("INSERT INTO mural_likes(post_id, user_id) VALUES(?, ?)", [postId, req.userId]);
       await registrarPontos(req.userId, 'MURAL_LIKE', POINTS.MURAL_LIKE, { post_id: postId });
+      console.log('[MURAL] Like added');
       res.json({ ok: true, action: 'liked', points: POINTS.MURAL_LIKE });
     }
   } catch (error) {
-    console.error('Erro ao processar like:', error);
+    console.error('[MURAL] Erro ao processar like:', error);
     res.status(500).json({ ok: false, error: 'Erro ao processar like' });
   }
 });
 
 app.post('/api/mural/:id/comments', authMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
     const postId = req.params.id;
     const { texto } = req.body;
     if (!texto?.trim()) return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
 
+    console.log('[MURAL] Creating comment for post:', postId, 'by user:', req.userId);
     const result = await run(
       "INSERT INTO mural_comments(post_id, user_id, texto) VALUES(?, ?, ?)",
       [postId, req.userId, texto.trim()]
     );
     await registrarPontos(req.userId, 'MURAL_COMMENT', POINTS.MURAL_COMMENT, { post_id: postId });
+    console.log('[MURAL] Comment created with ID:', result.lastID);
     res.json({ ok: true, id: result.lastID, points: POINTS.MURAL_COMMENT });
   } catch (error) {
-    console.error('Erro ao criar comentário:', error);
+    console.error('[MURAL] Erro ao criar comentário:', error);
     res.status(500).json({ ok: false, error: 'Erro ao criar comentário' });
   }
 });
@@ -1144,10 +1273,16 @@ app.post('/api/mural/:id/comments', authMiddleware, async (req, res) => {
 // -------------------------------------------------------------
 app.post('/api/reservas', authMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
     const { sala, data, inicio, fim, assunto } = req.body;
     if (!sala || !data || !inicio || !fim || !assunto) {
       return res.status(400).json({ ok: false, error: 'Todos os campos são obrigatórios' });
     }
+
+    console.log('[RESERVAS] Creating reservation:', { sala, data, inicio, fim, assunto, user_id: req.userId });
 
     // Check for conflicts
     const conflict = await get(`
@@ -1155,7 +1290,9 @@ app.post('/api/reservas', authMiddleware, async (req, res) => {
       WHERE sala = ? AND data = ? 
       AND ((inicio <= ? AND fim > ?) OR (inicio < ? AND fim >= ?))
     `, [sala, data, inicio, inicio, fim, fim]);
+    
     if (conflict) {
+      console.log('[RESERVAS] Conflict detected:', conflict);
       return res.status(400).json({ ok: false, error: 'Conflito de horário para esta sala' });
     }
 
@@ -1165,24 +1302,27 @@ app.post('/api/reservas', authMiddleware, async (req, res) => {
     );
 
     await registrarPontos(req.userId, 'RESERVA_CREATE', POINTS.RESERVA_CREATE, { sala, data });
+    console.log('[RESERVAS] Reservation created with ID:', result.lastID);
     res.json({ ok: true, id: result.lastID, points: POINTS.RESERVA_CREATE });
   } catch (error) {
-    console.error('Erro ao criar reserva:', error);
+    console.error('[RESERVAS] Erro ao criar reserva:', error);
     res.status(500).json({ ok: false, error: 'Erro ao criar reserva' });
   }
 });
 
 app.get('/api/reservas', async (_req, res) => {
   try {
+    console.log('[RESERVAS] Loading all reservations');
     const reservas = await all(`
       SELECT r.*, u.nome as responsavel
       FROM reservas r
       LEFT JOIN usuarios u ON r.user_id = u.id
       ORDER BY r.data ASC, r.inicio ASC
     `);
+    console.log('[RESERVAS] Loaded', reservas.length, 'reservations');
     res.json({ ok: true, reservas });
   } catch (error) {
-    console.error('Erro ao buscar reservas:', error);
+    console.error('[RESERVAS] Erro ao buscar reservas:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar reservas' });
   }
 });
@@ -1192,35 +1332,43 @@ app.get('/api/reservas', async (_req, res) => {
 // -------------------------------------------------------------
 app.post('/api/portaria/agendamentos', authMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
     const { data, hora, visitante, documento, observacao } = req.body;
     if (!data || !hora || !visitante) {
       return res.status(400).json({ ok: false, error: 'Data, hora e visitante são obrigatórios' });
     }
 
+    console.log('[PORTARIA] Creating appointment:', { data, hora, visitante, user_id: req.userId });
     const result = await run(
       "INSERT INTO portaria_agendamentos(data, hora, visitante, documento, observacao, user_id) VALUES(?, ?, ?, ?, ?, ?)",
       [data, hora, visitante, documento, observacao, req.userId]
     );
 
     await registrarPontos(req.userId, 'PORTARIA_CREATE', POINTS.PORTARIA_CREATE, { data, visitante });
+    console.log('[PORTARIA] Appointment created with ID:', result.lastID);
     res.json({ ok: true, id: result.lastID, points: POINTS.PORTARIA_CREATE });
   } catch (error) {
-    console.error('Erro ao criar agendamento:', error);
+    console.error('[PORTARIA] Erro ao criar agendamento:', error);
     res.status(500).json({ ok: false, error: 'Erro ao criar agendamento' });
   }
 });
 
 app.get('/api/portaria/agendamentos', async (_req, res) => {
   try {
+    console.log('[PORTARIA] Loading all appointments');
     const agendamentos = await all(`
       SELECT p.*, u.nome as responsavel
       FROM portaria_agendamentos p
       LEFT JOIN usuarios u ON p.user_id = u.id
       ORDER BY p.data DESC, p.hora DESC
     `);
+    console.log('[PORTARIA] Loaded', agendamentos.length, 'appointments');
     res.json({ ok: true, agendamentos });
   } catch (error) {
-    console.error('Erro ao buscar agendamentos:', error);
+    console.error('[PORTARIA] Erro ao buscar agendamentos:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar agendamentos' });
   }
 });
@@ -1230,15 +1378,23 @@ app.get('/api/portaria/agendamentos', async (_req, res) => {
 // -------------------------------------------------------------
 app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
     const { trocas } = req.body;
     if (!Array.isArray(trocas) || trocas.length === 0) {
       return res.status(400).json({ ok: false, error: 'Lista de trocas é obrigatória' });
     }
 
+    console.log('[TROCAS] Processing bulk protein exchanges for user:', req.userId, 'count:', trocas.length);
     let inseridas = 0;
     for (const troca of trocas) {
       const { data, proteina_original, proteina_nova } = troca;
-      if (!data || !proteina_nova || proteina_nova === proteina_original) continue;
+      if (!data || !proteina_nova || proteina_nova === proteina_original) {
+        console.log('[TROCAS] Skipping invalid exchange:', troca);
+        continue;
+      }
 
       const existing = await get(
         "SELECT * FROM trocas_proteina WHERE user_id = ? AND data = ?",
@@ -1247,26 +1403,35 @@ app.post('/api/trocas-proteina/bulk', authMiddleware, async (req, res) => {
 
       if (!existing) {
         const dia = format(parseISO(data), 'EEEE', { locale: ptBR });
+        console.log('[TROCAS] Inserting exchange:', { data, dia, proteina_original, proteina_nova });
         await run(
           "INSERT INTO trocas_proteina(data, dia, proteina_original, proteina_nova, user_id) VALUES(?, ?, ?, ?, ?)",
           [data, dia, proteina_original, proteina_nova, req.userId]
         );
         await registrarPontos(req.userId, 'TROCA_PROTEINA', POINTS.TROCA_PROTEINA, { data });
         inseridas++;
+      } else {
+        console.log('[TROCAS] Exchange already exists for date:', data);
       }
     }
 
+    console.log('[TROCAS] Bulk operation completed. Inserted:', inseridas);
     const totalPoints = inseridas * POINTS.TROCA_PROTEINA;
     res.json({ ok: true, inseridas, totalPoints });
   } catch (error) {
-    console.error('Erro ao processar trocas:', error);
+    console.error('[TROCAS] Erro ao processar trocas:', error);
     res.status(500).json({ ok: false, error: 'Erro ao processar trocas' });
   }
 });
 
 app.get('/api/trocas-proteina', authMiddleware, async (req, res) => {
   try {
+    if (!req.userId) {
+      return res.status(401).json({ ok: false, error: 'Usuário não autenticado' });
+    }
+
     const { from, to } = req.query;
+    console.log('[TROCAS] Loading exchanges for user:', req.userId, 'from:', from, 'to:', to);
     let sql = "SELECT * FROM trocas_proteina WHERE user_id = ?";
     const params = [req.userId];
 
@@ -1277,9 +1442,10 @@ app.get('/api/trocas-proteina', authMiddleware, async (req, res) => {
 
     sql += " ORDER BY date(data) ASC";
     const trocas = await all(sql, params);
+    console.log('[TROCAS] Loaded', trocas.length, 'exchanges');
     res.json({ ok: true, trocas });
   } catch (error) {
-    console.error('Erro ao buscar trocas:', error);
+    console.error('[TROCAS] Erro ao buscar trocas:', error);
     res.status(500).json({ ok: false, error: 'Erro ao buscar trocas' });
   }
 });

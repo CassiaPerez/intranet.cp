@@ -260,12 +260,14 @@ export const AdminPanel: React.FC = () => {
   const loadSolicitacoesTI = async () => {
     try {
       setLoading(true);
+      console.log('[ADMIN-TI] Loading TI requests...');
       const res = await fetch(`${API_BASE}/api/ti/solicitacoes`, { credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao carregar solicitações TI');
+      console.log('[ADMIN-TI] Loaded', j.solicitacoes?.length || 0, 'requests');
       setSolicitacoesTI(j.solicitacoes || []);
     } catch (e: any) {
-      console.error(e);
+      console.error('[ADMIN-TI] Error:', e);
       toast.error(e.message || 'Erro ao carregar solicitações TI');
     } finally {
       setLoading(false);
@@ -298,6 +300,7 @@ export const AdminPanel: React.FC = () => {
 
   const handleTIStatusUpdate = async (solicitacaoId: string, novoStatus: SolicitacaoTI['status']) => {
     try {
+      console.log('[ADMIN-TI] Updating status for request', solicitacaoId, 'to', novoStatus);
       const res = await fetch(`${API_BASE}/api/ti/solicitacoes/${solicitacaoId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -306,9 +309,11 @@ export const AdminPanel: React.FC = () => {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao atualizar status');
+      console.log('[ADMIN-TI] Status updated successfully');
       toast.success('Status atualizado!');
       loadSolicitacoesTI();
     } catch (e: any) {
+      console.error('[ADMIN-TI] Error updating status:', e);
       toast.error(e.message || 'Erro ao atualizar status');
     }
   };
@@ -317,12 +322,14 @@ export const AdminPanel: React.FC = () => {
   const loadPostsMural = async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}${MURAL_BASE}`, { credentials: 'include' });
+      console.log('[ADMIN-RH] Loading mural posts...');
+      const res = await fetch(`${API_BASE}/api/mural/posts`, { credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao carregar posts do mural');
-      setPostsMural(j.posts || j.data || []);
+      console.log('[ADMIN-RH] Loaded', j.posts?.length || 0, 'posts');
+      setPostsMural(j.posts || []);
     } catch (e: any) {
-      console.error(e);
+      console.error('[ADMIN-RH] Error:', e);
       toast.error(e.message || 'Erro ao carregar posts');
     } finally {
       setLoading(false);
@@ -345,7 +352,8 @@ export const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       if (rhModalMode === 'create') {
-        const res = await fetch(`${API_BASE}${MURAL_BASE}`, {
+        console.log('[ADMIN-RH] Creating post:', rhFormData);
+        const res = await fetch(`${API_BASE}/api/mural/posts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -353,9 +361,11 @@ export const AdminPanel: React.FC = () => {
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(j.error || 'Erro ao criar post');
+        console.log('[ADMIN-RH] Post created with ID:', j.id);
         toast.success('Post criado!');
       } else if (selectedPost) {
-        const res = await fetch(`${API_BASE}${MURAL_BASE}/${selectedPost.id}`, {
+        console.log('[ADMIN-RH] Updating post:', selectedPost.id);
+        const res = await fetch(`${API_BASE}/api/mural/posts/${selectedPost.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -363,11 +373,13 @@ export const AdminPanel: React.FC = () => {
         });
         const j = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(j.error || 'Erro ao atualizar post');
+        console.log('[ADMIN-RH] Post updated successfully');
         toast.success('Post atualizado!');
       }
       setShowRHModal(false);
       loadPostsMural();
     } catch (e: any) {
+      console.error('[ADMIN-RH] Error saving post:', e);
       toast.error(e.message || 'Erro ao salvar post');
     } finally {
       setLoading(false);
@@ -377,12 +389,15 @@ export const AdminPanel: React.FC = () => {
   const handleDeletePost = async (postId: string) => {
     if (!confirm('Tem certeza que deseja deletar este post?')) return;
     try {
-      const res = await fetch(`${API_BASE}${MURAL_BASE}/${postId}`, { method: 'DELETE', credentials: 'include' });
+      console.log('[ADMIN-RH] Deleting post:', postId);
+      const res = await fetch(`${API_BASE}/api/mural/posts/${postId}`, { method: 'DELETE', credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao deletar post');
+      console.log('[ADMIN-RH] Post deleted successfully');
       toast.success('Post deletado!');
       loadPostsMural();
     } catch (e: any) {
+      console.error('[ADMIN-RH] Error deleting post:', e);
       toast.error(e.message || 'Erro ao deletar post');
     }
   };

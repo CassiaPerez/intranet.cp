@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
 import { Plus, Heart, ThumbsUp, MessageCircle, Calendar, User, Edit3, Trash2 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
@@ -8,146 +8,130 @@ import toast from 'react-hot-toast';
 
 const API_BASE = '';
 
-interface Reaction {
-  type: 'like' | 'love';
-  userId: string;
-  userName: string;
+interface Post {
+  id: string;
+  titulo: string;
+  conteudo: string;
+  author: string;
+  pinned: boolean;
+  created_at: string;
+  likes_count: number;
+  comments_count: number;
 }
 
 interface Comment {
   id: string;
-  text: string;
+  texto: string;
   author: string;
-  authorId: string;
-  date: Date;
-}
-
-interface Post {
-  id: string;
-  title: string;
-  content: string;
-  author: string;
-  authorId: string;
-  authorSector: string;
-  date: Date;
-  reactions: Reaction[];
-  comments: Comment[];
+  created_at: string;
 }
 
 export const Mural: React.FC = () => {
   const { user } = useAuth();
+  const [posts, setPosts] = useState<Post[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showNewPostModal, setShowNewPostModal] = useState(false);
   const [newPost, setNewPost] = useState({
-    title: '',
-    content: '',
+    titulo: '',
+    conteudo: '',
+    pinned: false,
   });
   const [commentTexts, setCommentTexts] = useState<{ [key: string]: string }>({});
   
-  const [posts, setPosts] = useState<Post[]>([
-    {
-      id: '1',
-      title: 'Nova política de home office',
-      content: 'A partir de 1º de fevereiro, todos os colaboradores poderão trabalhar em home office 2 dias por semana. Para mais informações, entre em contato com o RH.',
-      author: 'Maria Santos',
-      authorId: '2',
-      authorSector: 'RH',
-      date: new Date('2025-01-14'),
-      reactions: [
-        { type: 'like', userId: '1', userName: 'João Silva' },
-        { type: 'love', userId: '3', userName: 'Carlos Oliveira' },
-      ],
-      comments: [
-        {
-          id: '1',
-          text: 'Excelente notícia! Quando podemos começar?',
-          author: 'João Silva',
-          authorId: '1',
-          date: new Date('2025-01-14T10:30:00'),
-        },
-      ],
-    },
-    {
-      id: '2',
-      title: 'Atualização do sistema ERP',
-      content: 'O sistema ERP passará por manutenção no sábado das 8h às 12h. Durante este período, o sistema ficará indisponível.',
-      author: 'Carlos Oliveira',
-      authorId: '3',
-      authorSector: 'TI',
-      date: new Date('2025-01-13'),
-      reactions: [
-        { type: 'like', userId: '2', userName: 'Maria Santos' },
-      ],
-      comments: [],
-    },
-  ]);
+  const canPost = user?.setor === 'TI' || user?.setor === 'RH' || user?.role === 'admin';
 
-  const canPost = user?.setor === 'TI' || user?.setor === 'RH';
-  const isAdmin = ((user as any)?.sector || (user as any)?.setor) === 'TI' || ((user as any)?.sector || (user as any)?.setor) === 'RH';
+  useEffect(() => {
+    loadPosts();
+  }, []);
 
-  const handleCreatePost = (e: React.FormEvent) => {
+  const loadPosts = async () => {
+    try {
+      setLoading(true);
+      console.log('[MURAL] Loading posts...');
+      const response = await fetch(`${API_BASE}/api/mural/posts`, {
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('[MURAL] Posts loaded:', data.posts?.length || 0);
+      setPosts(data.posts || []);
+    } catch (error) {
+      console.error('[MURAL] Error loading posts:', error);
+      toast.error('Erro ao carregar posts do mural');
+      setPosts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!newPost.title.trim() || !newPost.content.trim()) {
+    if (!newPost.titulo.trim() || !newPost.conteudo.trim()) {
       toast.error('Preencha todos os campos!');
       return;
     }
 
-    const post: Post = {
-      id: Date.now().toString(),
-      title: newPost.title,
-      content: newPost.content,
-      author: (user as any)?.name || (user as any)?.nome || 'Usuário',
-      authorId: (user as any)?.id || '0',
-      authorSector: (user as any)?.sector || (user as any)?.setor || '',
-      date: new Date(),
-      reactions: [],
-      comments: [],
-    };
+    try {
+      console.log('[MURAL] Creating post:', newPost);
+      const response = await fetch(`${API_BASE}/api/mural/posts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify(newPost),
+      });
 
-    setPosts(prev => [post, ...prev]);
-    setNewPost({ title: '', content: '' });
-    setShowNewPostModal(false);
-    toast.success('Publicação criada com sucesso!');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('[MURAL] Post created with ID:', data.id);
+      
+      setNewPost({ titulo: '', conteudo: '', pinned: false });
+      setShowNewPostModal(false);
+      toast.success('Publicação criada com sucesso!');
+      
+      // Reload posts to show the new one
+      await loadPosts();
+    } catch (error) {
+      console.error('[MURAL] Error creating post:', error);
+      toast.error(error.message || 'Erro ao criar publicação');
+    }
   };
 
-  const handleReaction = async (postId: string, reactionType: 'like' | 'love') => {
+  const handleReaction = async (postId: string) => {
     try {
-      // Update local state optimistically
-      setPosts(prevPosts => 
-        prevPosts.map(post => {
-          if (post.id === postId) {
-            const userReaction = post.reactions.find(r => r.userId === user?.id);
-            let newReactions = [...post.reactions];
-            
-            if (userReaction) {
-              // Remove existing reaction
-              newReactions = newReactions.filter(r => r.userId !== user?.id);
-              if (userReaction.type !== reactionType) {
-                // Add new reaction if different
-                newReactions.push({
-                  type: reactionType,
-                  userId: user?.id || '',
-                  userName: user?.name || ''
-                });
-              }
-            } else {
-              // Add new reaction
-              newReactions.push({
-                type: reactionType,
-                userId: user?.id || '',
-                userName: user?.name || ''
-              });
-            }
-            
-            return { ...post, reactions: newReactions };
-          }
-          return post;
-        })
-      );
+      console.log('[MURAL] Processing like for post:', postId);
+      const response = await fetch(`${API_BASE}/api/mural/${postId}/like`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('[MURAL] Like processed:', data.action);
       
-      toast.success('Reação adicionada!');
+      if (data.points) {
+        toast.success(`${data.action === 'liked' ? 'Curtida' : 'Descurtida'} registrada! +${data.points} pontos`);
+      } else {
+        toast.success(data.action === 'liked' ? 'Post curtido!' : 'Curtida removida!');
+      }
+      
+      // Reload posts to update counts
+      await loadPosts();
     } catch (error) {
-      console.error('Erro ao processar reação:', error);
+      console.error('[MURAL] Error processing reaction:', error);
       toast.error('Erro ao processar reação');
     }
   };
@@ -157,38 +141,45 @@ export const Mural: React.FC = () => {
     if (!commentText?.trim()) return;
 
     try {
-      const newComment: Comment = {
-        id: Date.now().toString(),
-        text: commentText.trim(),
-        author: user?.name || 'Usuário',
-        authorId: user?.id || '',
-        date: new Date(),
-      };
-      
-      // Update local state
-      setPosts(prevPosts => 
-        prevPosts.map(post => {
-          if (post.id === postId) {
-            return { ...post, comments: [...post.comments, newComment] };
-          }
-          return post;
-        })
-      );
+      console.log('[MURAL] Creating comment for post:', postId);
+      const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include',
+        body: JSON.stringify({ texto: commentText.trim() }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      console.log('[MURAL] Comment created with ID:', data.id);
       
       setCommentTexts(prev => ({ ...prev, [postId]: '' }));
-      toast.success('Comentário adicionado!');
+      
+      if (data.points) {
+        toast.success(`Comentário adicionado! +${data.points} pontos`);
+      } else {
+        toast.success('Comentário adicionado!');
+      }
+      
+      // Reload posts to update counts
+      await loadPosts();
     } catch (error) {
-      console.error('Erro ao adicionar comentário:', error);
+      console.error('[MURAL] Error creating comment:', error);
       toast.error('Erro ao adicionar comentário');
     }
   };
 
-  const getUserReaction = (post: Post) => {
-    return post.reactions.find(r => r.userId === user?.id);
-  };
-
-  const getReactionCount = (post: Post, type: 'like' | 'love') => {
-    return post.reactions.filter(r => r.type === type).length;
+  const formatDate = (dateString: string) => {
+    try {
+      return format(new Date(dateString), 'dd/MM/yyyy HH:mm', { locale: ptBR });
+    } catch {
+      return dateString;
+    }
   };
 
   return (
@@ -209,95 +200,63 @@ export const Mural: React.FC = () => {
 
         {/* Posts Feed */}
         <div className="space-y-6">
-          {posts.map((post) => (
-            <div key={post.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-              {/* Post Header */}
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
-                    <User className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">{post.author}</h3>
-                    <div className="flex items-center space-x-2 text-sm text-gray-500">
-                      <span>{post.authorSector}</span>
-                      <span>•</span>
-                      <Calendar className="w-4 h-4" />
-                      <span>{format(post.date, 'dd/MM/yyyy HH:mm', { locale: ptBR })}</span>
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            </div>
+          ) : posts.length === 0 ? (
+            <div className="bg-white rounded-xl p-8 text-center">
+              <MessageCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-semibold text-gray-900 mb-2">Nenhuma publicação ainda</h3>
+              <p className="text-gray-600">
+                {canPost ? 'Seja o primeiro a criar uma publicação!' : 'Aguarde novas publicações da equipe.'}
+              </p>
+            </div>
+          ) : (
+            posts.map((post) => (
+              <div key={post.id} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                {/* Post Header */}
+                <div className="flex items-start justify-between mb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center">
+                      <User className="w-5 h-5 text-white" />
                     </div>
-                  </div>
-                </div>
-                
-                {(post.authorId === user?.id || isAdmin) && (
-                  <div className="flex space-x-2">
-                    <button className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button className="p-2 text-gray-400 hover:text-red-600 transition-colors">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Post Content */}
-              <div className="mb-4">
-                <h2 className="text-xl font-semibold text-gray-900 mb-2">{post.title}</h2>
-                <p className="text-gray-700 leading-relaxed">{post.content}</p>
-              </div>
-
-              {/* Reactions */}
-              <div className="flex items-center space-x-4 mb-4 pb-4 border-b border-gray-100">
-                <button
-                  onClick={() => handleReaction(post.id, 'like')}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
-                    getUserReaction(post)?.type === 'like'
-                      ? 'bg-blue-100 text-blue-600'
-                      : 'hover:bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  <ThumbsUp className="w-4 h-4" />
-                  <span className="text-sm font-medium">{getReactionCount(post, 'like')}</span>
-                </button>
-                
-                <button
-                  onClick={() => handleReaction(post.id, 'love')}
-                  className={`flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors ${
-                    getUserReaction(post)?.type === 'love'
-                      ? 'bg-red-100 text-red-600'
-                      : 'hover:bg-gray-100 text-gray-600'
-                  }`}
-                >
-                  <Heart className="w-4 h-4" />
-                  <span className="text-sm font-medium">{getReactionCount(post, 'love')}</span>
-                </button>
-
-                <div className="flex items-center space-x-2 text-gray-500">
-                  <MessageCircle className="w-4 h-4" />
-                  <span className="text-sm">{post.comments.length} comentários</span>
-                </div>
-              </div>
-
-              {/* Comments */}
-              <div className="space-y-4">
-                {post.comments.map((comment) => (
-                  <div key={comment.id} className="flex space-x-3">
-                    <div className="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center flex-shrink-0">
-                      <User className="w-4 h-4 text-gray-600" />
-                    </div>
-                    <div className="flex-1">
-                      <div className="bg-gray-50 rounded-lg p-3">
-                        <div className="flex items-center space-x-2 mb-1">
-                          <span className="font-medium text-gray-900 text-sm">{comment.author}</span>
-                          <span className="text-xs text-gray-500">
-                            {format(comment.date, 'dd/MM HH:mm')}
+                    <div>
+                      <h3 className="font-semibold text-gray-900">{post.author}</h3>
+                      <div className="flex items-center space-x-2 text-sm text-gray-500">
+                        <Calendar className="w-4 h-4" />
+                        <span>{formatDate(post.created_at)}</span>
+                        {post.pinned && (
+                          <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">
+                            Fixado
                           </span>
-                        </div>
-                        <p className="text-gray-700 text-sm">{comment.text}</p>
+                        )}
                       </div>
                     </div>
                   </div>
-                ))}
+                </div>
+
+                {/* Post Content */}
+                <div className="mb-4">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-2">{post.titulo}</h2>
+                  <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{post.conteudo}</p>
+                </div>
+
+                {/* Reactions */}
+                <div className="flex items-center space-x-4 mb-4 pb-4 border-b border-gray-100">
+                  <button
+                    onClick={() => handleReaction(post.id)}
+                    className="flex items-center space-x-2 px-3 py-2 rounded-lg transition-colors hover:bg-blue-50 text-blue-600"
+                  >
+                    <ThumbsUp className="w-4 h-4" />
+                    <span className="text-sm font-medium">{post.likes_count || 0}</span>
+                  </button>
+
+                  <div className="flex items-center space-x-2 text-gray-500">
+                    <MessageCircle className="w-4 h-4" />
+                    <span className="text-sm">{post.comments_count || 0} comentários</span>
+                  </div>
+                </div>
 
                 {/* Add Comment */}
                 <div className="flex space-x-3">
@@ -322,8 +281,8 @@ export const Mural: React.FC = () => {
                   </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
 
         {/* New Post Modal */}
@@ -339,8 +298,8 @@ export const Mural: React.FC = () => {
                     </label>
                     <input
                       type="text"
-                      value={newPost.title}
-                      onChange={(e) => setNewPost({ ...newPost, title: e.target.value })}
+                      value={newPost.titulo}
+                      onChange={(e) => setNewPost({ ...newPost, titulo: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="Digite o título da publicação..."
                       required
@@ -352,13 +311,24 @@ export const Mural: React.FC = () => {
                       Conteúdo
                     </label>
                     <textarea
-                      value={newPost.content}
-                      onChange={(e) => setNewPost({ ...newPost, content: e.target.value })}
+                      value={newPost.conteudo}
+                      onChange={(e) => setNewPost({ ...newPost, conteudo: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       rows={6}
                       placeholder="Escreva o conteúdo da publicação..."
                       required
                     />
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="pinned"
+                      checked={newPost.pinned}
+                      onChange={(e) => setNewPost({ ...newPost, pinned: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="pinned" className="text-sm text-gray-700">Fixar publicação no topo</label>
                   </div>
 
                   <div className="flex space-x-3 pt-4">
