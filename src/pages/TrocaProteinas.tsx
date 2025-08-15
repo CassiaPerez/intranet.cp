@@ -275,7 +275,7 @@ export const TrocaProteinas: React.FC = () => {
       const from = format(startOfMonth(hoje), 'yyyy-MM-01');
       const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
       const reloadRes = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { 
-      const prevRes = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { 
+        credentials: 'include',
       });
       
       if (reloadRes.ok) {
