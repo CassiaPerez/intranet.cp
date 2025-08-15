@@ -48,7 +48,7 @@ export const Mural: React.FC = () => {
     try {
       setLoading(true);
       console.log('[MURAL] Loading posts...');
-      const response = await fetch(`${API_BASE}/api/mural/posts`, {
+      const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
         credentials: 'include'
       });
 
@@ -78,7 +78,7 @@ export const Mural: React.FC = () => {
 
     try {
       console.log('[MURAL] Creating post:', newPost);
-      const response = await fetch(`${API_BASE}/api/mural/posts`, {
+      const response = await fetch(`${API_BASE}/api/rh/mural/posts`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -110,7 +110,7 @@ export const Mural: React.FC = () => {
   const handleReaction = async (postId: string) => {
     try {
       console.log('[MURAL] Processing like for post:', postId);
-      const response = await fetch(`${API_BASE}/api/mural/${postId}/like`, {
+      const response = await fetch(`${API_BASE}/api/rh/mural/${postId}/like`, {
         method: 'POST',
         credentials: 'include',
       });
@@ -142,7 +142,7 @@ export const Mural: React.FC = () => {
 
     try {
       console.log('[MURAL] Creating comment for post:', postId);
-      const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
+      const response = await fetch(`${API_BASE}/api/rh/mural/${postId}/comments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

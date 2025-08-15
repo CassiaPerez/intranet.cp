@@ -26,7 +26,7 @@ import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
 const API_BASE = '';
-const MURAL_BASE = '/api/mural/posts'; // <-- troque para '/api/rh/mural/posts' se for o seu backend
+const MURAL_BASE = '/api/rh/mural/posts';
 
 interface Usuario {
   id: string;
@@ -323,7 +323,7 @@ export const AdminPanel: React.FC = () => {
     try {
       setLoading(true);
       console.log('[ADMIN-RH] Loading mural posts...');
-      const res = await fetch(`${API_BASE}/api/mural/posts`, { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/rh/mural/posts`, { credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao carregar posts do mural');
       console.log('[ADMIN-RH] Loaded', j.posts?.length || 0, 'posts');
@@ -353,7 +353,7 @@ export const AdminPanel: React.FC = () => {
       setLoading(true);
       if (rhModalMode === 'create') {
         console.log('[ADMIN-RH] Creating post:', rhFormData);
-        const res = await fetch(`${API_BASE}/api/mural/posts`, {
+        const res = await fetch(`${API_BASE}/api/rh/mural/posts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -365,7 +365,7 @@ export const AdminPanel: React.FC = () => {
         toast.success('Post criado!');
       } else if (selectedPost) {
         console.log('[ADMIN-RH] Updating post:', selectedPost.id);
-        const res = await fetch(`${API_BASE}/api/mural/posts/${selectedPost.id}`, {
+        const res = await fetch(`${API_BASE}/api/rh/mural/posts/${selectedPost.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
@@ -390,7 +390,7 @@ export const AdminPanel: React.FC = () => {
     if (!confirm('Tem certeza que deseja deletar este post?')) return;
     try {
       console.log('[ADMIN-RH] Deleting post:', postId);
-      const res = await fetch(`${API_BASE}/api/mural/posts/${postId}`, { method: 'DELETE', credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/rh/mural/posts/${postId}`, { method: 'DELETE', credentials: 'include' });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.error || 'Erro ao deletar post');
       console.log('[ADMIN-RH] Post deleted successfully');
