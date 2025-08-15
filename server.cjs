@@ -1192,6 +1192,61 @@ app.patch('/api/admin/users/:id/password', requireAuth, requireRole('admin'), (r
   );
 });
 
+// Reports/Relatórios routes
+app.get('/api/relatorios', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  console.log('[REPORTS] Loading reports data...');
+  
+  // Get statistics from all modules
+  const queries = [
+    { name: 'usuarios', sql: 'SELECT COUNT(*) as count FROM usuarios WHERE ativo = 1' },
+    { name: 'mural_posts', sql: 'SELECT COUNT(*) as count FROM mural_posts WHERE ativo = 1' },
+    { name: 'reservas', sql: 'SELECT COUNT(*) as count FROM reservas' },
+    { name: 'ti_solicitacoes', sql: 'SELECT COUNT(*) as count FROM ti_solicitacoes' },
+    { name: 'trocas_proteina', sql: 'SELECT COUNT(*) as count FROM trocas_proteina' },
+    { name: 'portaria_agendamentos', sql: 'SELECT COUNT(*) as count FROM portaria_agendamentos' },
+  ];
+  
+  const results = {};
+  let completed = 0;
+  
+  queries.forEach(query => {
+    db.get(query.sql, (err, row) => {
+      if (err) {
+        console.error(`[REPORTS] Error querying ${query.name}:`, err);
+        results[query.name] = 0;
+      } else {
+        results[query.name] = row?.count || 0;
+      }
+      
+      completed++;
+      
+      if (completed === queries.length) {
+        console.log('[REPORTS] Reports data loaded:', results);
+        
+        res.json({
+          ok: true,
+          relatorios: {
+            usuarios_ativos: results.usuarios,
+            posts_mural: results.mural_posts,
+            reservas_salas: results.reservas,
+            solicitacoes_ti: results.ti_solicitacoes,
+            trocas_proteina: results.trocas_proteina,
+            agendamentos_portaria: results.portaria_agendamentos,
+            timestamp: new Date().toISOString()
+          }
+        });
+      }
+    });
+  });
+});
+
+// Alias for compatibility
+app.get('/api/admin/reports', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  console.log('[REPORTS-ALIAS] Redirecting to relatorios...');
+  req.url = '/api/relatorios';
+  app._router.handle(req, res);
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error('[SERVER] Unhandled error:', err);
