@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:full": "concurrently \"npm run dev\" \"npm run server\"",
+    "dev:backend": "node server.cjs",
+    "dev:separate": "echo 'Run: npm run dev (terminal 1) && npm run dev:backend (terminal 2)'",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

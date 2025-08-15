@@ -12,6 +12,24 @@ const app = express();
 const PORT = 3005;
 const JWT_SECRET = 'your-secret-key-change-in-production';
 
+// Add process error handlers to prevent crashes
+process.on('uncaughtException', (error) => {
+  console.error('[SERVER] ❌ Uncaught Exception:', error.message);
+  console.error('[SERVER] Stack:', error.stack);
+  // Don't exit in development
+  if (process.env.NODE_ENV !== 'development') {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[SERVER] ❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit in development
+  if (process.env.NODE_ENV !== 'development') {
+    process.exit(1);
+  }
+});
+
 // Database setup
 const DB_PATH = path.join(__dirname, 'data', 'database.sqlite');
 console.log('[SERVER] Database path:', DB_PATH);
@@ -25,18 +43,28 @@ if (!fs.existsSync(dataDir)) {
 }
 
 // Initialize database
-const db = new sqlite3.Database(DB_PATH, (err) => {
+const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE, (err) => {
   if (err) {
-    console.error('[SERVER] Database connection error:', err);
+    console.error('[SERVER] ❌ Database connection error:', err.message);
+    console.error('[SERVER] Database path:', DB_PATH);
+    console.error('[SERVER] Attempting to create database...');
+    
+    // Try to create the database file if it doesn't exist
+    try {
+      fs.writeFileSync(DB_PATH, '');
+      console.log('[SERVER] ✅ Database file created');
+    } catch (createError) {
+      console.error('[SERVER] ❌ Failed to create database file:', createError.message);
+    }
   } else {
-    console.log('[SERVER] Connected to SQLite database');
+    console.log('[SERVER] ✅ Connected to SQLite database');
   }
 });
 
 // Function to create demo users
 const createDemoUsers = () => {
   return new Promise((resolve) => {
-    console.log('[DEMO] Creating demo users...');
+    console.log('[DEMO] 🔄 Creating demo users...');
     
     const users = [
       { id: 'super-admin', username: 'admin', nome: 'Super Admin', email: null, senha: 'admin', setor: 'TI', role: 'admin' },
@@ -48,6 +76,22 @@ const createDemoUsers = () => {
     
     let processed = 0;
     
+    // Check if database is ready
+    db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'", (err, row) => {
+      if (err) {
+        console.error('[DEMO] ❌ Database not ready:', err.message);
+        resolve(false);
+        return;
+      }
+      
+      if (!row) {
+        console.log('[DEMO] ⏳ Waiting for usuarios table to be created...');
+        setTimeout(() => createDemoUsers().then(resolve), 1000);
+        return;
+      }
+      
+      console.log('[DEMO] ✅ Database is ready, creating users...');
+      
     users.forEach((user) => {
       const hashedPassword = bcrypt.hashSync(user.senha, 10);
       
@@ -57,7 +101,7 @@ const createDemoUsers = () => {
         [user.id, user.username, user.nome, user.email, hashedPassword, user.setor, user.role],
         function(err) {
           if (err) {
-            console.error(`[DEMO] Error creating user ${user.username}:`, err);
+            console.error(`[DEMO] ❌ Error creating user ${user.username}:`, err.message);
           } else {
             console.log(`[DEMO] ✅ User created: ${user.username} (${user.nome}) - Role: ${user.role}`);
           }
@@ -65,17 +109,27 @@ const createDemoUsers = () => {
           processed++;
           if (processed === users.length) {
             console.log('[DEMO] All demo users processed');
-            resolve(true);
+            
+            // Verify users were created
+            db.all('SELECT username, nome, role FROM usuarios WHERE ativo = 1', (verifyErr, rows) => {
+              if (!verifyErr && rows) {
+                console.log(`[DEMO] ✅ Verification: ${rows.length} active users in database`);
+              }
+              resolve(true);
+            });
           }
         }
       );
+    });
     });
   });
 };
 
 // Create tables if they don't exist
-db.serialize(() => {
+const initializeDatabase = () => {
   console.log('[DB] Creating tables...');
+  
+  const tables = [];
   
   // Users table
   db.run(`
@@ -92,11 +146,28 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating usuarios table:', err);
+      console.error('[DB] ❌ Error creating usuarios table:', err.message);
     } else {
       console.log('[DB] ✅ usuarios table ready');
+      tables.push('usuarios');
+      checkAllTablesReady();
     }
   });
+  
+  let expectedTables = 8; // Total number of tables
+  
+  const checkAllTablesReady = () => {
+    if (tables.length === expectedTables) {
+      console.log('[DB] ✅ All tables created, initializing demo users...');
+      setTimeout(() => {
+        createDemoUsers().then((success) => {
+          if (success) {
+            console.log('[DB] ✅ Database initialization complete');
+          }
+        });
+      }, 500);
+    }
+  };
 
   // Mural posts table
   db.run(`
@@ -114,9 +185,11 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating mural_posts table:', err);
+      console.error('[DB] ❌ Error creating mural_posts table:', err.message);
     } else {
       console.log('[DB] ✅ mural_posts table ready');
+      tables.push('mural_posts');
+      checkAllTablesReady();
     }
   });
 
@@ -133,9 +206,11 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating mural_likes table:', err);
+      console.error('[DB] ❌ Error creating mural_likes table:', err.message);
     } else {
       console.log('[DB] ✅ mural_likes table ready');
+      tables.push('mural_likes');
+      checkAllTablesReady();
     }
   });
 
@@ -152,9 +227,11 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating mural_comments table:', err);
+      console.error('[DB] ❌ Error creating mural_comments table:', err.message);
     } else {
       console.log('[DB] ✅ mural_comments table ready');
+      tables.push('mural_comments');
+      checkAllTablesReady();
     }
   });
 
@@ -174,9 +251,11 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating reservas table:', err);
+      console.error('[DB] ❌ Error creating reservas table:', err.message);
     } else {
       console.log('[DB] ✅ reservas table ready');
+      tables.push('reservas');
+      checkAllTablesReady();
     }
   });
 
@@ -195,9 +274,11 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating ti_solicitacoes table:', err);
+      console.error('[DB] ❌ Error creating ti_solicitacoes table:', err.message);
     } else {
       console.log('[DB] ✅ ti_solicitacoes table ready');
+      tables.push('ti_solicitacoes');
+      checkAllTablesReady();
     }
   });
 
@@ -214,9 +295,11 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating trocas_proteina table:', err);
+      console.error('[DB] ❌ Error creating trocas_proteina table:', err.message);
     } else {
       console.log('[DB] ✅ trocas_proteina table ready');
+      tables.push('trocas_proteina');
+      checkAllTablesReady();
     }
   });
 
@@ -235,17 +318,24 @@ db.serialize(() => {
     )
   `, (err) => {
     if (err) {
-      console.error('[DB] Error creating portaria_agendamentos table:', err);
+      console.error('[DB] ❌ Error creating portaria_agendamentos table:', err.message);
     } else {
       console.log('[DB] ✅ portaria_agendamentos table ready');
-      // Create demo users after all tables are ready
-      setTimeout(() => {
-        createDemoUsers();
-      }, 500);
+      tables.push('portaria_agendamentos');
+      checkAllTablesReady();
     }
   });
   
   console.log('[SERVER] Database tables setup initiated');
+};
+
+// Initialize database in a safe way
+db.serialize(() => {
+  try {
+    initializeDatabase();
+  } catch (error) {
+    console.error('[DB] ❌ Error during database initialization:', error.message);
+  }
 });
 
 // Middleware
@@ -1127,22 +1217,86 @@ app.get('/api/debug/users', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`[SERVER] Server running on http://localhost:${PORT}`);
   console.log(`[SERVER] Database: ${DB_PATH}`);
   console.log(`[SERVER] Demo mode: ${!!process.env.DEMO_MODE || true}`);
+  console.log(`[SERVER] Process ID: ${process.pid}`);
   
-  // Force create demo users after server starts
-  setTimeout(async () => {
-    console.log('[SERVER] Forcing demo users creation...');
-    await createDemoUsers();
+  // Health check endpoint for monitoring
+  setTimeout(() => {
+    console.log('[SERVER] ✅ Server health check passed');
     
-    // Verify users exist
-    db.all('SELECT email, nome, role, setor FROM usuarios WHERE ativo = 1', (err, users) => {
-      if (!err && users) {
-        console.log(`[SERVER] ✅ Available demo users: ${users.length}`);
-        users.forEach(user => {
-          console.log(`  - ${user.email} (${user.nome}) - Role: ${user.role} - Setor: ${user.setor}`);
+    // Check if database is working
+    db.get('SELECT COUNT(*) as count FROM usuarios', (err, result) => {
+      if (err) {
+        console.error('[SERVER] ❌ Database health check failed:', err.message);
+      } else {
+        console.log(`[SERVER] ✅ Database health check passed - ${result.count} users`);
+      }
+    });
+  }, 3000);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`[SERVER] ❌ Port ${PORT} is already in use`);
+    console.error(`[SERVER] Try: killall node or lsof -ti:${PORT} | xargs kill`);
+  } else {
+    console.error('[SERVER] ❌ Server error:', error.message);
+  }
+});
+
+// Add connection timeout
+server.timeout = 30000; // 30 seconds
+
+// Handle server close
+server.on('close', () => {
+  console.log('[SERVER] 🔴 Server closed');
+});
+
+// Improved graceful shutdown
+const gracefulShutdown = (signal) => {
+  console.log(`\n[SERVER] 🛑 ${signal} received, shutting down gracefully...`);
+  
+  server.close(() => {
+    console.log('[SERVER] ✅ HTTP server closed');
+    
+    db.close((err) => {
+      if (err) {
+        console.error('[SERVER] ❌ Error closing database:', err.message);
+        process.exit(1);
+      } else {
+        console.log('[SERVER] ✅ Database connection closed');
+        console.log('[SERVER] 👋 Goodbye!');
+        process.exit(0);
+      }
+    });
+  });
+  
+  // Force exit after 10 seconds
+  setTimeout(() => {
+    console.error('[SERVER] ⏰ Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
+};
+
+// Listen for shutdown signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle process exit
+process.on('exit', (code) => {
+  console.log(`[SERVER] 🏁 Process exiting with code: ${code}`);
+});
+
+console.log('[SERVER] 🚀 Initialization complete');
+console.log('[SERVER] 📝 Available endpoints:');
+console.log('[SERVER]   - POST /auth/login');
+console.log('[SERVER]   - GET /api/me');
+console.log('[SERVER]   - GET /api/debug/users');
+console.log('[SERVER]   - POST /api/debug/recreate-users');
         });
         console.log('[SERVER] 🎯 Try logging in with: admin / admin');
       }
