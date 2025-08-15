@@ -31,6 +31,10 @@ export default defineConfig(({ mode }) => {
           },
           onProxyReq: (proxyReq, req, res) => {
             console.log('[VITE-PROXY] Request:', req.method, req.url);
+           // Forward authentication cookies
+           if (req.headers.cookie) {
+             proxyReq.setHeader('cookie', req.headers.cookie);
+           }
           }
           // Se seu backend NÃO usa prefixo /api, descomente:
           // rewrite: p => p.replace(/^\/api/, ''),
@@ -40,6 +44,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
           timeout: 30000,
+          onProxyReq: (proxyReq, req, res) => {
+            // Forward authentication cookies for auth routes
+            if (req.headers.cookie) {
+              proxyReq.setHeader('cookie', req.headers.cookie);
+            }
+          },
         },
       },
     },
