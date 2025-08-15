@@ -196,7 +196,9 @@ const Equipamentos: React.FC = () => {
       const url = `${BASE_API}/api/ti/solicitacoes`;
       const res = await fetch(url, {
         method: 'POST',
-        headers: getAuthHeadersWithJson(user),
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
         body: JSON.stringify({
           titulo: equipmentName,

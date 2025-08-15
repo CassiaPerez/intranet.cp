@@ -145,7 +145,9 @@ export const Mural: React.FC = () => {
       console.log('[MURAL] Creating comment for post:', postId);
       const response = await fetch(`${API_BASE}/api/mural/${postId}/comments`, {
         method: 'POST',
-        headers: getAuthHeadersWithJson(user),
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
         body: JSON.stringify({ texto: commentText.trim() }),
       });
