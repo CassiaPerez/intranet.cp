@@ -39,8 +39,9 @@ if (fs.existsSync(DB_PATH)) {
       console.log('[SERVER] Database file exists:', stats.size, 'bytes');
     }
   } catch (error) {
-    console.log('[SERVER] ⚠️ Error checking database file, removing...', error.message);
-    try { fs.unlinkSync(DB_PATH); } catch (e) { console.error('[SERVER] ❌ Failed to delete corrupted database:', e.message); }
+    console.log('[SERVER] ⚠️ Error checking database file:', error.message);
+    // Don't delete on check error - could be temporary permission issue
+    console.log('[SERVER] Will attempt to connect anyway...');
   }
 } else {
   console.log('[SERVER] Database file does not exist, will be created');
@@ -51,8 +52,14 @@ const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_C
   if (err) {
     console.error('[SERVER] ❌ Database connection error:', err.message);
     console.error('[SERVER] Database path:', DB_PATH);
+    // Don't exit - let other parts of server work
+    console.error('[SERVER] ⚠️ Server will continue but database features may not work');
   } else {
     console.log('[SERVER] ✅ Connected to SQLite database');
+    // Set SQLite optimizations
+    db.run('PRAGMA journal_mode=WAL;', (e) => {
+      if (e) console.error('[DB] Warning setting WAL mode:', e.message);
+    });
     db.run('PRAGMA foreign_keys = ON;', (e) => {
       if (e) console.error('[DB] ❌ Error enabling foreign keys:', e.message);
       else console.log('[DB] ✅ Foreign keys enabled');
@@ -89,12 +96,19 @@ const createDemoUsers = () => new Promise((resolve) => {
   const checkAndCreate = (retries = 10) => {
     db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'", async (err, row) => {
       if (err) {
-        console.error('[DEMO] ❌ Database error:', err.message);
-        if (retries > 0) return setTimeout(() => checkAndCreate(retries - 1), 1000);
+        console.error('[DEMO] ❌ Database error checking table:', err.message);
+        if (retries > 0) {
+          console.log(`[DEMO] 🔄 Retrying in 1s... (${retries} attempts left)`);
+          return setTimeout(() => checkAndCreate(retries - 1), 1000);
+        }
+        console.error('[DEMO] ❌ Failed to check database after retries, continuing anyway...');
         return resolve(false);
       }
       if (!row) {
-        if (retries > 0) return setTimeout(() => checkAndCreate(retries - 1), 1000);
+        if (retries > 0) {
+          console.log(`[DEMO] ⏳ Table not ready, retrying... (${retries} attempts left)`);
+          return setTimeout(() => checkAndCreate(retries - 1), 1000);
+        }
         console.error('[DEMO] ❌ usuarios table not created after retries');
         return resolve(false);
       }
@@ -118,7 +132,7 @@ const createDemoUsers = () => new Promise((resolve) => {
           );
           console.log(`[DEMO] ✅ User upserted: ${u.username} (${u.nome}) - Role: ${u.role}`);
         } catch (e) {
-          console.error(`[DEMO] ❌ Error creating user ${u.username}:`, e.message);
+          console.error(`[DEMO] ⚠️ Error creating user ${u.username}:`, e.message, '(continuing...)');
         } finally {
           processed++;
           if (processed === users.length) {
@@ -143,31 +157,46 @@ const initializeDatabase = () => {
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
+      username TEXT UNIQUE,
       nome TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       senha_hash TEXT NOT NULL,
       -- coluna legado 'senha' pode existir em bancos antigos:
       senha TEXT,
+      -- coluna legado 'senha' pode existir em bancos antigos:
+      senha TEXT,
       setor TEXT NOT NULL DEFAULT 'Colaborador',
       role TEXT NOT NULL DEFAULT 'colaborador',
+      ativo INTEGER DEFAULT 1,
       ativo INTEGER DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `, (err) => {
-    if (err) console.error('[DB] ❌ usuarios:', err.message);
+    if (err) {
+      console.error('[DB] ❌ Error creating usuarios table:', err.message);
+      // Don't crash - continue with other tables
+    }
     else {
       console.log('[DB] ✅ usuarios table ready');
       tables.push('usuarios');
       // Migração defensiva
       db.all("PRAGMA table_info(usuarios)", (e, cols) => {
-        if (e) return;
+        if (e) {
+          console.error('[DB] ⚠️ Error checking table info:', e.message);
+          return;
+        }
         const have = new Set(cols.map(c => c.name));
         const addCol = (ddl) => db.run(`ALTER TABLE usuarios ADD COLUMN ${ddl}`, () => {});
+        if (!have.has('username')) addCol('username TEXT UNIQUE');
         if (!have.has('senha_hash')) addCol('senha_hash TEXT');
+        if (!have.has('senha')) addCol('senha TEXT');
         if (!have.has('setor')) addCol(`setor TEXT NOT NULL DEFAULT 'Colaborador'`);
         if (!have.has('role')) addCol(`role TEXT NOT NULL DEFAULT 'colaborador'`);
         if (!have.has('ativo')) addCol(`ativo INTEGER DEFAULT 1`);
+        if (!have.has('ativo')) addCol(`ativo INTEGER DEFAULT 1`);
         if (!have.has('created_at')) addCol(`created_at TEXT NOT NULL DEFAULT (datetime('now'))`);
+        // Preenche 'senha' se existir e estiver NULL (evita NOT NULL de bancos antigos)
+        db.run("UPDATE usuarios SET senha = COALESCE(senha, senha_hash, '') WHERE senha IS NULL", () => {});
         // Preenche 'senha' se existir e estiver NULL (evita NOT NULL de bancos antigos)
         db.run("UPDATE usuarios SET senha = COALESCE(senha, senha_hash, '') WHERE senha IS NULL", () => {});
       });
@@ -744,37 +773,57 @@ app.get('/api/admin/users', requireAuth, requireRole('admin', 'rh'), (req, res) 
 
 app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
   console.log('[ADMIN-POST-USER] 👤 Creating user:', req.body?.email || 'no email');
-  const { nome, email, senha, password, setor, role } = req.body || {};
+  const { nome, email, senha, password, setor, role } = req.body;
   const senhaFinal = senha || password;
-  const emailNormalizado = email ? email.trim().toLowerCase() : '';
-  const nomeNormalizado = nome ? nome.trim() : '';
-  const setorNormalizado = setor ? setor.trim() : 'Colaborador';
-  const roleNormalizado = role ? role.trim() : 'colaborador';
+  
+  // Normalize and validate input
+  const emailNormalizado = email?.trim().toLowerCase() || '';
+  const nomeNormalizado = nome?.trim() || '';
+  const setorNormalizado = setor?.trim() || 'Colaborador';
+  const roleNormalizado = role?.trim() || 'colaborador';
 
+  // Validation
   const setoresValidos = ['TI', 'RH', 'Colaborador', 'Geral'];
   const rolesValidos = ['admin', 'rh', 'colaborador'];
 
-  if (!nomeNormalizado || !emailNormalizado || !senhaFinal)
+  if (!nomeNormalizado || !emailNormalizado || !senhaFinal) {
+    console.log('[ADMIN-POST-USER] ❌ Missing required fields');
     return res.status(400).json({ ok: false, error: 'Nome, email e senha são obrigatórios' });
-  if (senhaFinal.length < 6)
+  }
+  if (senhaFinal.length < 6) {
+    console.log('[ADMIN-POST-USER] ❌ Password too short');
     return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
-  if (!setoresValidos.includes(setorNormalizado))
+  }
+  if (!setoresValidos.includes(setorNormalizado)) {
+    console.log('[ADMIN-POST-USER] ❌ Invalid sector:', setorNormalizado);
     return res.status(400).json({ ok: false, error: 'Setor inválido' });
-  if (!rolesValidos.includes(roleNormalizado))
+  }
+  if (!rolesValidos.includes(roleNormalizado)) {
+    console.log('[ADMIN-POST-USER] ❌ Invalid role:', roleNormalizado);
     return res.status(400).json({ ok: false, error: 'Role inválido' });
+  }
 
   (async () => {
     try {
+      console.log('[ADMIN-POST-USER] 🔍 Checking if email exists:', emailNormalizado);
       const exists = await dbGet('SELECT id FROM usuarios WHERE email=?', [emailNormalizado]);
-      if (exists) return res.status(409).json({ ok: false, error: 'E-mail já cadastrado' });
+      if (exists) {
+        console.log('[ADMIN-POST-USER] ❌ Email already exists');
+        return res.status(409).json({ ok: false, error: 'E-mail já cadastrado' });
+      }
 
+      console.log('[ADMIN-POST-USER] 🔐 Hashing password...');
       const hashed = await bcrypt.hash(senhaFinal, 10);
+      
+      console.log('[ADMIN-POST-USER] 💾 Inserting user into database...');
       const result = await dbRun(
-        `INSERT INTO usuarios (nome, email, senha_hash, senha, setor, role, ativo)
-         VALUES (?, ?, ?, ?, ?, ?, 1)`,
-        [nomeNormalizado, emailNormalizado, hashed, hashed, setorNormalizado, roleNormalizado]
+        `INSERT INTO usuarios (nome, email, senha_hash, setor, role, ativo)
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        [nomeNormalizado, emailNormalizado, hashed, setorNormalizado, roleNormalizado]
       );
 
+      console.log('[ADMIN-POST-USER] ✅ User created successfully with ID:', result.lastID);
+      
       res.status(201).json({
         ok: true,
         id: result.lastID,
@@ -782,14 +831,21 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
         email: emailNormalizado,
         setor: setorNormalizado,
         role: roleNormalizado,
+        ativo: true,
         created_at: new Date().toISOString(),
         message: 'Usuário criado com sucesso'
       });
     } catch (error) {
       console.error('[ADMIN-POST-USER] ❌ Error:', error.message);
-      if (String(error.message).includes('UNIQUE constraint failed'))
+      console.error('[ADMIN-POST-USER] ❌ Stack:', error.stack);
+      
+      if (String(error.message).includes('UNIQUE constraint failed')) {
         return res.status(409).json({ ok: false, error: 'E-mail já cadastrado' });
-      if (!res.headersSent) res.status(500).json({ ok: false, error: 'Erro interno ao criar usuário' });
+      }
+      
+      if (!res.headersSent) {
+        res.status(500).json({ ok: false, error: 'Erro interno ao criar usuário' });
+      }
     }
   })();
 });
@@ -916,6 +972,8 @@ const server = app.listen(PORT, () => {
   console.log(`[SERVER] Database: ${DB_PATH}`);
   console.log(`[SERVER] 🎯 Ready to receive API requests`);
   console.log(`[SERVER] Process ID: ${process.pid}`);
+  console.log(`[SERVER] Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`[SERVER] 🔒 Development mode - server will not auto-shutdown on errors`);
 
   setTimeout(() => {
     console.log('[SERVER] ✅ Server health check passed');
@@ -930,37 +988,55 @@ server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
     console.error(`[SERVER] ❌ Port ${PORT} is already in use`);
     console.error(`[SERVER] Try: killall node or lsof -ti:${PORT} | xargs kill`);
+    process.exit(1); // Only exit for port conflicts
   } else {
-    console.error('[SERVER] ❌ Server error:', error.message);
+    console.error('[SERVER] ⚠️ Server error (continuing):', error.message);
+    // Don't exit for other server errors in development
   }
 });
-server.timeout = 30000;
-server.on('close', () => console.log('[SERVER] 🔴 Server closed'));
 
-// Graceful shutdown
-const gracefulShutdown = (signal) => {
+// Increase timeout to prevent premature disconnections
+server.timeout = 60000;
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
+
+server.on('close', () => console.log('[SERVER] 🔴 Server closed'));
   console.log(`\n[SERVER] 🛑 ${signal} received, shutting down gracefully...`);
+  // Only shutdown if explicitly requested (Ctrl+C, etc.)
+  if (signal !== 'SIGTERM' && signal !== 'SIGINT') {
+    console.log('[SERVER] ⚠️ Ignoring shutdown signal in development:', signal);
+    return;
+  }
   server.close(() => {
     console.log('[SERVER] ✅ HTTP server closed');
     db.close((err) => {
-      if (err) { console.error('[SERVER] ❌ Error closing database:', err.message); process.exit(1); }
-      else { console.log('[SERVER] ✅ Database connection closed'); console.log('[SERVER] 👋 Goodbye!'); process.exit(0); }
+      if (err) console.error('[SERVER] ❌ Error closing database:', err.message);
+      else console.log('[SERVER] ✅ Database connection closed');
+      console.log('[SERVER] 👋 Goodbye!');
+      process.exit(0);
     });
   });
-  setTimeout(() => { console.error('[SERVER] ⏰ Forced shutdown after timeout'); process.exit(1); }, 10000);
+  setTimeout(() => {
+    console.error('[SERVER] ⏰ Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000);
 };
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Only handle intentional shutdown signals
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-process.on('exit', (code) => console.log(`[SERVER] 🏁 Process exiting with code: ${code}`));
+process.on('exit', (code) => {
+  console.log(`[SERVER] 🏁 Process exiting with code: ${code}`);
+});
 
 // Handlers de processo (apenas logar)
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('[unhandledRejection] ❌ Promise rejection not handled:', reason);
-  console.error('[unhandledRejection] Promise:', promise);
+  console.error('[unhandledRejection] ⚠️ Promise rejection (will not crash):', reason);
+  // Don't crash in development
 });
 process.on('uncaughtException', (error) => {
-  console.error('[uncaughtException] ❌ Exception not caught:', error.message);
+  console.error('[uncaughtException] ⚠️ Exception (will not crash):', error.message);
   console.error('[uncaughtException] Stack:', error.stack);
+  // Don't crash in development
 });
 
 console.log('[SERVER] 🚀 Initialization complete');
