@@ -74,7 +74,7 @@ const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
   db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows));
 });
 
-// Demo users (corrigido: sem forçar id, usa senha_hash)
+// Demo users (corrigido: sem forçar id, grava senha e senha_hash)
 const createDemoUsers = () => new Promise((resolve) => {
   console.log('[DEMO] 🔄 Creating demo users...');
   const users = [
@@ -104,16 +104,17 @@ const createDemoUsers = () => new Promise((resolve) => {
         try {
           const hash = await bcrypt.hash(u.senha, 10);
           await dbRun(
-            `INSERT INTO usuarios (username, nome, email, senha_hash, setor, role, ativo)
-             VALUES (?, ?, ?, ?, ?, ?, 1)
+            `INSERT INTO usuarios (username, nome, email, senha_hash, senha, setor, role, ativo)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
              ON CONFLICT(email) DO UPDATE SET 
                username=excluded.username,
                nome=excluded.nome,
                senha_hash=excluded.senha_hash,
+               senha=excluded.senha,
                setor=excluded.setor,
                role=excluded.role,
                ativo=1`,
-            [u.username, u.nome, u.email.toLowerCase(), hash, u.setor, u.role]
+            [u.username, u.nome, u.email.toLowerCase(), hash, hash, u.setor, u.role]
           );
           console.log(`[DEMO] ✅ User upserted: ${u.username} (${u.nome}) - Role: ${u.role}`);
         } catch (e) {
@@ -132,7 +133,7 @@ const createDemoUsers = () => new Promise((resolve) => {
   checkAndCreate();
 });
 
-// Criação de tabelas + migração defensiva mínima
+// Criação de tabelas + migração defensiva
 const initializeDatabase = () => {
   console.log('[DB] Creating tables...');
   const tables = [];
@@ -145,7 +146,7 @@ const initializeDatabase = () => {
       nome TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       senha_hash TEXT NOT NULL,
-      -- coluna legado 'senha' pode existir em bancos antigos (não utilizada):
+      -- coluna legado 'senha' pode existir em bancos antigos:
       senha TEXT,
       setor TEXT NOT NULL DEFAULT 'Colaborador',
       role TEXT NOT NULL DEFAULT 'colaborador',
@@ -167,6 +168,8 @@ const initializeDatabase = () => {
         if (!have.has('role')) addCol(`role TEXT NOT NULL DEFAULT 'colaborador'`);
         if (!have.has('ativo')) addCol(`ativo INTEGER DEFAULT 1`);
         if (!have.has('created_at')) addCol(`created_at TEXT NOT NULL DEFAULT (datetime('now'))`);
+        // Preenche 'senha' se existir e estiver NULL (evita NOT NULL de bancos antigos)
+        db.run("UPDATE usuarios SET senha = COALESCE(senha, senha_hash, '') WHERE senha IS NULL", () => {});
       });
       checkAllReady();
     }
@@ -419,7 +422,6 @@ app.get('/api/debug/auth', requireAuth, (req, res) => {
 
 /* ===== Mural ===== */
 app.get('/api/mural/posts', (req, res) => {
-  console.log('[MURAL-GET] Loading posts...');
   db.all(
     `SELECT 
       id, titulo, conteudo, author, pinned, created_at,
@@ -441,7 +443,6 @@ app.get('/api/mural', (req, res) => {
 });
 
 app.post('/api/rh/mural/posts', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  console.log('[MURAL-RH-POST] Creating post:', req.body);
   const { titulo, conteudo, pinned } = req.body;
   if (!titulo?.trim() || !conteudo?.trim()) return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
 
@@ -458,7 +459,6 @@ app.post('/api/rh/mural/posts', requireAuth, requireRole('rh', 'admin'), (req, r
 });
 
 app.post('/api/mural/posts', requireAuth, requireRole('rh', 'admin', 'ti'), (req, res) => {
-  console.log('[MURAL-POST] 📝 Creating post:', req.body);
   const { titulo, conteudo, pinned } = req.body;
   if (!titulo?.trim() || !conteudo?.trim()) return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
 
@@ -475,7 +475,6 @@ app.post('/api/mural/posts', requireAuth, requireRole('rh', 'admin', 'ti'), (req
 });
 
 app.patch('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  console.log('[MURAL-PATCH] 📝 Updating post:', req.params.id);
   const { titulo, conteudo, pinned } = req.body;
   const postId = req.params.id;
   if (!titulo?.trim() || !conteudo?.trim()) return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
@@ -494,7 +493,6 @@ app.patch('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req,
 });
 
 app.delete('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  console.log('[MURAL-DELETE] 🗑️ Soft deleting post:', req.params.id);
   const postId = req.params.id;
   db.run(
     'UPDATE mural_posts SET ativo = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
@@ -508,7 +506,6 @@ app.delete('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req
 });
 
 app.post('/api/mural/:id/like', requireAuth, (req, res) => {
-  console.log('[MURAL-LIKE] Processing like for post:', req.params.id);
   const postId = req.params.id;
   const userId = req.user.id;
   const likeId = `like_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -535,7 +532,6 @@ app.post('/api/mural/:id/like', requireAuth, (req, res) => {
 });
 
 app.post('/api/mural/:id/comments', requireAuth, (req, res) => {
-  console.log('[MURAL-COMMENT] Creating comment for post:', req.params.id);
   const { texto } = req.body;
   const postId = req.params.id;
   const userId = req.user.id;
@@ -774,9 +770,9 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
 
       const hashed = await bcrypt.hash(senhaFinal, 10);
       const result = await dbRun(
-        `INSERT INTO usuarios (nome, email, senha_hash, setor, role, ativo)
-         VALUES (?, ?, ?, ?, ?, 1)`,
-        [nomeNormalizado, emailNormalizado, hashed, setorNormalizado, roleNormalizado]
+        `INSERT INTO usuarios (nome, email, senha_hash, senha, setor, role, ativo)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`,
+        [nomeNormalizado, emailNormalizado, hashed, hashed, setorNormalizado, roleNormalizado]
       );
 
       res.status(201).json({
@@ -828,7 +824,7 @@ app.patch('/api/admin/users/:id/password', requireAuth, requireRole('admin'), (r
     return res.status(400).json({ ok: false, error: 'Nova senha é obrigatória (mín. 6 caracteres)' });
 
   const hashedPassword = bcrypt.hashSync(senha, 10);
-  db.run('UPDATE usuarios SET senha_hash = ? WHERE id = ?', [hashedPassword, userId],
+  db.run('UPDATE usuarios SET senha_hash = ?, senha = ? WHERE id = ?', [hashedPassword, hashedPassword, userId],
     function (err) {
       if (err) return res.status(500).json({ ok: false, error: 'Database error' });
       if (this.changes === 0) return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
