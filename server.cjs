@@ -1039,6 +1039,26 @@ app.use((err, req, res, next) => {
 });
 
 /* ===== Start ===== */
+const findAvailablePort = async (startPort, maxRetries = 5) => {
+  for (let port = startPort; port < startPort + maxRetries; port++) {
+    try {
+      const server = app.listen(port);
+      console.log(`[SERVER] 🚀 Backend server running on http://localhost:${port}`);
+      console.log(`[SERVER] 🎯 Ready to receive API requests`);
+      return server;
+    } catch (error) {
+      if (error.code === 'EADDRINUSE') {
+        console.log(`[SERVER] ⚠️ Port ${port} is in use, trying ${port + 1}...`);
+        continue;
+      } else {
+        console.error('[SERVER] ⚠️ Server error:', error.message);
+        throw error;
+      }
+    }
+  }
+  throw new Error(`Could not find available port after ${maxRetries} attempts`);
+};
+
 const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
   if (retries <= 0) {
     console.error('[SERVER] ❌ Failed to start server after multiple attempts');
@@ -1048,6 +1068,7 @@ const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
   const server = app.listen(port, () => {
     console.log(`[SERVER] 🚀 Backend server running on http://localhost:${port}`);
     console.log(`[SERVER] 🎯 Ready to receive API requests`);
+    console.log(`[SERVER] 📊 Export routes available at /api/export/*`);
   });
 
   server.on('error', (error) => {
