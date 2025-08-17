@@ -997,6 +997,8 @@ server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
 server.on('close', () => console.log('[SERVER] 🔴 Server closed'));
+
+const gracefulShutdown = (signal) => {
   console.log(`\n[SERVER] 🛑 ${signal} received, shutting down gracefully...`);
   // Only shutdown if explicitly requested (Ctrl+C, etc.)
   if (signal !== 'SIGTERM' && signal !== 'SIGINT') {
