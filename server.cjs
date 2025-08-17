@@ -11,6 +11,7 @@ const fs = require('fs');
 
 const app = express();
 const PORT = 3005;
+const MAX_PORT_RETRIES = 5;
 const JWT_SECRET = 'your-secret-key-change-in-production';
 
 // Parsing (uma única vez)
@@ -1091,21 +1092,33 @@ app.use((err, req, res, next) => {
 });
 
 /* ===== Start ===== */
-const server = app.listen(PORT, () => {
-  console.log(`[SERVER] 🚀 Backend server running on http://localhost:${PORT}`);
-  console.log(`[SERVER] 🎯 Ready to receive API requests`);
-});
-
-server.on('error', (error) => {
-  if (error.code === 'EADDRINUSE') {
-    console.error(`[SERVER] ❌ Port ${PORT} is already in use`);
-    process.exit(1);
-  } else {
-    console.error('[SERVER] ⚠️ Server error:', error.message);
+const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
+  if (retries <= 0) {
+    console.error('[SERVER] ❌ Failed to start server after multiple attempts');
+    return;
   }
-});
 
-server.on('close', () => console.log('[SERVER] Server closed'));
+  const server = app.listen(port, () => {
+    console.log(`[SERVER] 🚀 Backend server running on http://localhost:${port}`);
+    console.log(`[SERVER] 🎯 Ready to receive API requests`);
+  });
+
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.log(`[SERVER] ⚠️ Port ${port} is in use, trying port ${port + 1}...`);
+      setTimeout(() => tryStartServer(port + 1, retries - 1), 1000);
+    } else {
+      console.error('[SERVER] ⚠️ Server error:', error.message);
+    }
+  });
+
+  server.on('close', () => console.log('[SERVER] Server closed'));
+  
+  return server;
+};
+
+// Start server with port fallback
+tryStartServer(PORT);
 
 // Process error handlers (log only, don't crash)
 process.on('unhandledRejection', (reason, promise) => {
