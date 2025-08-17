@@ -12,6 +12,10 @@ const app = express();
 const PORT = 3005;
 const JWT_SECRET = 'your-secret-key-change-in-production';
 
+// Adicionar middlewares de parsing com limites
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
 // Database path setup
 const DB_PATH = path.join(__dirname, 'data', 'database.sqlite');
 console.log('[SERVER] Database path:', DB_PATH);
@@ -46,16 +50,7 @@ if (fs.existsSync(DB_PATH)) {
 }
 
 // Add process error handlers to prevent crashes
-process.on('uncaughtException', (error) => {
-  console.error('[SERVER] ❌ Uncaught Exception:', error.message);
-  console.error('[SERVER] Stack:', error.stack);
-  process.exit(1);
-});
-
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[SERVER] ❌ Unhandled Rejection at:', promise, 'reason:', reason);
-  process.exit(1);
-});
+// Remover handlers que fazem exit - serão readicionados no final
 
 // Database setup
 // Initialize database
@@ -63,12 +58,48 @@ const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_C
   if (err) {
     console.error('[SERVER] ❌ Database connection error:', err.message);
     console.error('[SERVER] Database path:', DB_PATH);
-    console.error('[SERVER] ❌ Database connection failed, exiting...');
-    process.exit(1);
+    console.error('[SERVER] ❌ Database connection failed, continuando sem DB...');
   } else {
     console.log('[SERVER] ✅ Connected to SQLite database');
+    
+    // Ativar foreign keys
+    db.run('PRAGMA foreign_keys = ON;', (err) => {
+      if (err) {
+        console.error('[DB] ❌ Error enabling foreign keys:', err.message);
+      } else {
+        console.log('[DB] ✅ Foreign keys enabled');
+      }
+    });
   }
 });
+
+// Helpers Promise para database
+const dbRun = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) reject(err);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+};
+
+const dbGet = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+};
+
+const dbAll = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (err, rows) => {
+      if (err) reject(err);
+      else resolve(rows);
+    });
+  });
+};
 
 // Function to create demo users
 const createDemoUsers = () => {
@@ -158,15 +189,16 @@ const initializeDatabase = () => {
   // Users table
   db.run(`
     CREATE TABLE IF NOT EXISTS usuarios (
-      id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE,
       nome TEXT NOT NULL,
-      email TEXT UNIQUE,
-      senha TEXT NOT NULL,
-      setor TEXT DEFAULT 'Geral',
+      email TEXT NOT NULL UNIQUE,
+      senha_hash TEXT NOT NULL,
+      senha TEXT,
+      setor TEXT NOT NULL DEFAULT 'Colaborador',
       role TEXT DEFAULT 'colaborador',
-      ativo BOOLEAN DEFAULT 1,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ativo BOOLEAN DEFAULT 1,  
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `, (err) => {
     if (err) {
@@ -174,6 +206,21 @@ const initializeDatabase = () => {
     } else {
       console.log('[DB] ✅ usuarios table ready');
       tables.push('usuarios');
+      
+      // Migração defensiva - adicionar colunas se não existem
+      db.all("PRAGMA table_info(usuarios)", (pragmaErr, columns) => {
+        if (!pragmaErr && columns) {
+          const columnNames = columns.map(col => col.name);
+          
+          if (!columnNames.includes('senha_hash')) {
+            db.run("ALTER TABLE usuarios ADD COLUMN senha_hash TEXT", (alterErr) => {
+              if (alterErr) console.log('[DB] Note: senha_hash column may already exist');
+              else console.log('[DB] ✅ Added senha_hash column');
+            });
+          }
+        }
+      });
+      
       checkAllTablesReady();
     }
   });
@@ -1189,38 +1236,105 @@ app.get('/api/admin/users', requireAuth, requireRole('admin', 'rh'), (req, res) 
 });
 
 app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
-  console.log('[ADMIN-POST-USER] Creating user:', req.body.email);
+  console.log('[ADMIN-POST-USER] 👤 Creating user:', req.body?.email || 'no email');
   
-  const { nome, email, senha, setor, role } = req.body;
+  const { nome, email, senha, password, setor, role } = req.body || {};
   
-  if (!nome || !email || !senha) {
+  // Normalizar entrada
+  const senhaFinal = senha || password;
+  const emailNormalizado = email ? email.trim().toLowerCase() : '';
+  const nomeNormalizado = nome ? nome.trim() : '';
+  const setorNormalizado = setor ? setor.trim() : 'Colaborador';
+  const roleNormalizado = role ? role.trim() : 'colaborador';
+  
+  // Validações
+  if (!nomeNormalizado || !emailNormalizado || !senhaFinal) {
+    console.log('[ADMIN-POST-USER] ❌ Missing required fields');
     return res.status(400).json({ ok: false, error: 'Nome, email e senha são obrigatórios' });
   }
-
-  const userId = `user_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  const hashedPassword = bcrypt.hashSync(senha, 10);
   
-  db.run(
-    `INSERT INTO usuarios (id, nome, email, senha, setor, role) 
-     VALUES (?, ?, ?, ?, ?, ?)`,
-    [userId, nome, email, hashedPassword, setor || 'Geral', role || 'colaborador'],
-    function(err) {
-      if (err) {
-        console.error('[ADMIN-POST-USER] Database error:', err);
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(400).json({ ok: false, error: 'Email já existe' });
-        }
-        return res.status(500).json({ ok: false, error: 'Database error' });
+  if (senhaFinal.length < 6) {
+    console.log('[ADMIN-POST-USER] ❌ Password too short');
+    return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
+  }
+  
+  // Validar setor
+  const setoresValidos = ['TI', 'RH', 'Colaborador', 'Geral'];
+  if (!setoresValidos.includes(setorNormalizado)) {
+    console.log('[ADMIN-POST-USER] ❌ Invalid sector:', setorNormalizado);
+    return res.status(400).json({ ok: false, error: 'Setor inválido' });
+  }
+  
+  // Validar role
+  const rolesValidos = ['admin', 'rh', 'colaborador'];
+  if (!rolesValidos.includes(roleNormalizado)) {
+    console.log('[ADMIN-POST-USER] ❌ Invalid role:', roleNormalizado);
+    return res.status(400).json({ ok: false, error: 'Role inválido' });
+  }
+
+  // Função assíncrona para criação segura
+  const createUserSafely = async () => {
+    try {
+      console.log('[ADMIN-POST-USER] 🔍 Checking email duplicity...');
+      
+      // Verificar duplicidade
+      const existingUser = await dbGet(
+        'SELECT id, email FROM usuarios WHERE email = ?',
+        [emailNormalizado]
+      );
+      
+      if (existingUser) {
+        console.log('[ADMIN-POST-USER] ❌ Email already exists:', emailNormalizado);
+        return res.status(409).json({ ok: false, error: 'E-mail já cadastrado' });
       }
       
-      console.log('[ADMIN-POST-USER] User created with ID:', userId);
-      res.json({ 
+      console.log('[ADMIN-POST-USER] 🔐 Hashing password...');
+      
+      // Hash da senha de forma assíncrona
+      const hashedPassword = await new Promise((resolve, reject) => {
+        bcrypt.hash(senhaFinal, 10, (err, hash) => {
+          if (err) reject(err);
+          else resolve(hash);
+        });
+      });
+      
+      console.log('[ADMIN-POST-USER] 💾 Inserting user into database...');
+      
+      // Inserir usuário
+      const result = await dbRun(
+        `INSERT INTO usuarios (nome, email, senha_hash, setor, role, ativo) 
+         VALUES (?, ?, ?, ?, ?, 1)`,
+        [nomeNormalizado, emailNormalizado, hashedPassword, setorNormalizado, roleNormalizado]
+      );
+      
+      console.log('[ADMIN-POST-USER] ✅ User created with ID:', result.lastID);
+      
+      res.status(201).json({ 
         ok: true, 
-        id: userId,
+        id: result.lastID,
+        nome: nomeNormalizado,
+        email: emailNormalizado,
+        setor: setorNormalizado,
+        role: roleNormalizado,
+        created_at: new Date().toISOString(),
         message: 'Usuário criado com sucesso'
       });
+      
+    } catch (error) {
+      console.error('[ADMIN-POST-USER] ❌ Error creating user:', error.message);
+      
+      if (error.message && error.message.includes('UNIQUE constraint failed')) {
+        return res.status(409).json({ ok: false, error: 'E-mail já cadastrado' });
+      }
+      
+      if (!res.headersSent) {
+        return res.status(500).json({ ok: false, error: 'Erro interno ao criar usuário' });
+      }
     }
-  );
+  };
+  
+  // Executar criação segura
+  createUserSafely();
 });
 
 app.patch('/api/admin/users/:id', requireAuth, requireRole('admin'), (req, res) => {
@@ -1349,16 +1463,20 @@ app.get('/api/admin/reports', requireAuth, requireRole('admin', 'rh'), (req, res
   app._router.handle(req, res);
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('[SERVER] Unhandled error:', err);
-  res.status(500).json({ ok: false, error: 'Internal server error' });
-});
-
 // 404 handler
 app.use((req, res) => {
   console.log('[SERVER] 404 - Route not found:', req.method, req.url);
   res.status(404).json({ ok: false, error: 'Route not found' });
+});
+
+// Middleware global de erro (DEVE vir APÓS todas as rotas)
+app.use((err, req, res, next) => {
+  console.error('[ERROR] ❌ Unhandled error in route:', err.message);
+  console.error('[ERROR] Stack:', err.stack);
+  
+  if (!res.headersSent) {
+    res.status(500).json({ ok: false, error: 'Erro interno do servidor' });
+  }
 });
 
 // Emergency route to recreate users if needed
@@ -1476,6 +1594,19 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // Handle process exit
 process.on('exit', (code) => {
   console.log(`[SERVER] 🏁 Process exiting with code: ${code}`);
+});
+
+// Handlers de processo resilientes (apenas logar, não finalizar)
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[unhandledRejection] ❌ Promise rejection not handled:', reason);
+  console.error('[unhandledRejection] Promise:', promise);
+  // NÃO chamar process.exit() - apenas logar
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[uncaughtException] ❌ Exception not caught:', error.message);
+  console.error('[uncaughtException] Stack:', error.stack);
+  // NÃO chamar process.exit() - apenas logar
 });
 
 console.log('[SERVER] 🚀 Initialization complete');
