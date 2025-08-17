@@ -157,17 +157,13 @@ const initializeDatabase = () => {
     CREATE TABLE IF NOT EXISTS usuarios (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE,
-      username TEXT UNIQUE,
       nome TEXT NOT NULL,
       email TEXT NOT NULL UNIQUE,
       senha_hash TEXT NOT NULL,
       -- coluna legado 'senha' pode existir em bancos antigos:
       senha TEXT,
-      -- coluna legado 'senha' pode existir em bancos antigos:
-      senha TEXT,
       setor TEXT NOT NULL DEFAULT 'Colaborador',
       role TEXT NOT NULL DEFAULT 'colaborador',
-      ativo INTEGER DEFAULT 1,
       ativo INTEGER DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
