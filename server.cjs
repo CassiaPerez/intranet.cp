@@ -684,6 +684,58 @@ app.get('/api/trocas-proteina', requireAuth, (req, res) => {
   });
 });
 
+// Export routes for downloads
+app.get('/api/trocas-proteina/export/:formato', requireAuth, requireRole('rh', 'admin'), (req, res) => {
+  const { formato } = req.params;
+  const { from, to } = req.query;
+  
+  if (!['excel', 'csv', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  }
+
+  let query = 'SELECT * FROM trocas_proteina';
+  const params = [];
+  if (from && to) { query += ' WHERE data BETWEEN ? AND ?'; params.push(from, to); }
+  query += ' ORDER BY data';
+
+  db.all(query, params, (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+    
+    // For now, return JSON data - frontend can handle conversion
+    res.json({ 
+      ok: true, 
+      trocas: rows || [],
+      formato,
+      timestamp: new Date().toISOString()
+    });
+  });
+});
+
+app.get('/api/reservas/export/:formato', requireAuth, requireRole('rh', 'admin'), (req, res) => {
+  const { formato } = req.params;
+  
+  if (!['excel', 'csv', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  }
+
+  db.all('SELECT * FROM reservas ORDER BY data, inicio', (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+    
+    res.json({ 
+      ok: true, 
+      reservas: rows || [],
+      formato,
+      timestamp: new Date().toISOString()
+    });
+  });
+});
+
+app.get('/api/ti/export/:formato', requireAuth, requireRole('ti', 'admin'), (req, res) => {
+  const { formato } = req.params;
+  
+  if (!['excel', 'csv', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  }
 const isWithinExchangeDeadline = (exchangeDate) => {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -775,6 +827,41 @@ app.get('/api/admin/users', requireAuth, requireRole('admin', 'rh'), (req, res) 
       if (err) return res.status(500).json({ ok: false, error: 'Database error' });
       res.json({ ok: true, users: rows || [] });
     });
+});
+
+// Add missing admin routes that might be called by frontend
+app.get('/api/admin/dashboard', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  const queries = [
+    { name: 'usuarios', sql: 'SELECT COUNT(*) as count FROM usuarios WHERE ativo = 1' },
+    { name: 'mural_posts', sql: 'SELECT COUNT(*) as count FROM mural_posts WHERE ativo = 1' },
+    { name: 'reservas', sql: 'SELECT COUNT(*) as count FROM reservas' },
+    { name: 'ti_solicitacoes', sql: 'SELECT COUNT(*) as count FROM ti_solicitacoes' },
+    { name: 'trocas_proteina', sql: 'SELECT COUNT(*) as count FROM trocas_proteina' },
+    { name: 'portaria_agendamentos', sql: 'SELECT COUNT(*) as count FROM portaria_agendamentos' },
+  ];
+  
+  const results = {};
+  let completed = 0;
+
+  queries.forEach(q => {
+    db.get(q.sql, (err, row) => {
+      results[q.name] = err ? 0 : (row?.count || 0);
+      completed++;
+      if (completed === queries.length) {
+        res.json({
+          ok: true,
+          stats: results,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+  });
+});
+
+app.get('/api/admin/stats', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  // Redirect to dashboard stats
+  req.url = '/api/admin/dashboard';
+  app._router.handle(req, res);
 });
 
 app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
@@ -960,8 +1047,39 @@ app.get('/api/debug/users', (req, res) => {
   });
 });
 
+// Health check route
+app.get('/api/health', (req, res) => {
+  db.get("SELECT 1 as test", (err, row) => {
+    if (err) {
+      return res.status(500).json({ 
+        ok: false, 
+        error: 'Database connection failed',
+        timestamp: new Date().toISOString()
+      });
+    }
+    res.json({ 
+      ok: true, 
+      status: 'healthy',
+      database: 'connected',
+      timestamp: new Date().toISOString()
+    });
+  });
+});
+
+// Catch-all API route for debugging
+app.all('/api/*', (req, res) => {
+  console.log('[SERVER] 404 - API route not found:', req.method, req.url);
+  res.status(404).json({ 
+    ok: false, 
+    error: 'API route not found',
+    method: req.method,
+    path: req.url,
+    timestamp: new Date().toISOString()
+  });
+});
+
 /* ===== 404 e erro global ===== */
-app.use((req, res) => {
+app.use((req, res, next) => {
   console.log('[SERVER] 404 - Route not found:', req.method, req.url);
   res.status(404).json({ ok: false, error: 'Route not found' });
 });
@@ -997,3 +1115,33 @@ process.on('uncaughtException', (error) => {
   console.log('[uncaughtException] ⚠️ Exception:', error.message);
 });
 
+  db.all('SELECT * FROM ti_solicitacoes ORDER BY created_at DESC', (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+    
+    res.json({ 
+      ok: true, 
+      solicitacoes: rows || [],
+      formato,
+      timestamp: new Date().toISOString()
+    });
+  });
+});
+
+app.get('/api/portaria/export/:formato', requireAuth, requireRole('rh', 'admin'), (req, res) => {
+  const { formato } = req.params;
+  
+  if (!['excel', 'csv', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  }
+
+  db.all('SELECT * FROM portaria_agendamentos ORDER BY data, hora', (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+    
+    res.json({ 
+      ok: true, 
+      agendamentos: rows || [],
+      formato,
+      timestamp: new Date().toISOString()
+    });
+  });
+});
