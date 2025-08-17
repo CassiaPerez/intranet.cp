@@ -187,7 +187,6 @@ const initializeDatabase = () => {
       setor TEXT NOT NULL DEFAULT 'Colaborador',
       role TEXT NOT NULL DEFAULT 'colaborador',
       ativo INTEGER DEFAULT 1,
-      ativo INTEGER DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `, (err) => {
@@ -737,6 +736,38 @@ app.get('/api/ti/export/:formato', requireAuth, requireRole('ti', 'admin'), (req
   if (!['excel', 'csv', 'pdf'].includes(formato)) {
     return res.status(400).json({ ok: false, error: 'Formato não suportado' });
   }
+
+  db.all('SELECT * FROM ti_solicitacoes ORDER BY created_at DESC', (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+    
+    res.json({ 
+      ok: true, 
+      solicitacoes: rows || [],
+      formato,
+      timestamp: new Date().toISOString()
+    });
+  });
+});
+
+app.get('/api/portaria/export/:formato', requireAuth, requireRole('rh', 'admin'), (req, res) => {
+  const { formato } = req.params;
+  
+  if (!['excel', 'csv', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  }
+
+  db.all('SELECT * FROM portaria_agendamentos ORDER BY data, hora', (err, rows) => {
+    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+    
+    res.json({ 
+      ok: true, 
+      agendamentos: rows || [],
+      formato,
+      timestamp: new Date().toISOString()
+    });
+  });
+});
+
 const isWithinExchangeDeadline = (exchangeDate) => {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1118,7 +1149,7 @@ const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
 };
 
 // Start server with port fallback
-tryStartServer(PORT);
+const server = tryStartServer(PORT);
 
 // Process error handlers (log only, don't crash)
 process.on('unhandledRejection', (reason, promise) => {
@@ -1126,35 +1157,4 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 process.on('uncaughtException', (error) => {
   console.log('[uncaughtException] ⚠️ Exception:', error.message);
-});
-
-  db.all('SELECT * FROM ti_solicitacoes ORDER BY created_at DESC', (err, rows) => {
-    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
-    
-    res.json({ 
-      ok: true, 
-      solicitacoes: rows || [],
-      formato,
-      timestamp: new Date().toISOString()
-    });
-  });
-});
-
-app.get('/api/portaria/export/:formato', requireAuth, requireRole('rh', 'admin'), (req, res) => {
-  const { formato } = req.params;
-  
-  if (!['excel', 'csv', 'pdf'].includes(formato)) {
-    return res.status(400).json({ ok: false, error: 'Formato não suportado' });
-  }
-
-  db.all('SELECT * FROM portaria_agendamentos ORDER BY data, hora', (err, rows) => {
-    if (err) return res.status(500).json({ ok: false, error: 'Database error' });
-    
-    res.json({ 
-      ok: true, 
-      agendamentos: rows || [],
-      formato,
-      timestamp: new Date().toISOString()
-    });
-  });
 });
