@@ -19,6 +19,7 @@ export const LoginPage: React.FC = () => {
 
   const handleGoogleLogin = () => {
     console.log('[LOGIN] Iniciando login Google...');
+    toast('Redirecionando para Google...', { icon: '🔄' });
     window.location.href = '/auth/google';
   };
 

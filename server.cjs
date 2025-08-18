@@ -221,6 +221,25 @@ const db = new sqlite3.Database(dbPath, (err) => {
   }
 });
 
+// Helper functions for database operations
+const dbGet = (query, params) => {
+  return new Promise((resolve, reject) => {
+    db.get(query, params, (err, row) => {
+      if (err) reject(err);
+      else resolve(row);
+    });
+  });
+};
+
+const dbRun = (query, params) => {
+  return new Promise((resolve, reject) => {
+    db.run(query, params, function (err) {
+      if (err) reject(err);
+      else resolve(this);
+    });
+  });
+};
+
 // Middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:5173',
@@ -236,8 +255,11 @@ const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
 
 app.use(session({
-  store: new SQLiteStore({ db: 'sessions.db', dir: path.join(__dirname, 'data') }),
-  secret: process.env.SESSION_SECRET || 'supersecretkey',
+  store: new SQLiteStore({
+    db: 'sessions.db',
+    dir: path.join(__dirname, 'data')
+  }),
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
   resave: false,
   saveUninitialized: false,
   cookie: {
@@ -247,26 +269,7 @@ app.use(session({
   }
 }));
 
-// Utility functions for database operations
-const dbGet = (query, params) => {
-  return new Promise((resolve, reject) => {
-    db.get(query, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
-    });
-  });
-};
-
-const dbRun = (query, params) => {
-  return new Promise((resolve, reject) => {
-    db.run(query, params, function (err) {
-      if (err) reject(err);
-      else resolve({ lastID: this.lastID, changes: this.changes });
-    });
-  });
-};
-
-// Configuração do Passport
+// Passport configuration
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   console.log('🔧 [AUTH] Configuring Google OAuth strategy...');
   
@@ -343,39 +346,6 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 } else {
   console.warn('⚠️ [AUTH] Google OAuth not configured - missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET');
 }
-
-// Serialização do usuário para a sessão
-passport.serializeUser((user, done) => {
-  console.log('🔐 [PASSPORT] Serializing user:', user.email);
-  done(null, user.id);
-});
-
-passport.deserializeUser(async (id, done) => {
-  try {
-    console.log('🔐 [PASSPORT] Deserializing user ID:', id);
-    const user = await dbGet('SELECT * FROM usuarios WHERE id = ?', [id]);
-    if (user) {
-      console.log('🔐 [PASSPORT] User deserialized:', user.email);
-      // Normalizar dados do usuário
-      const normalizedUser = {
-        id: user.id,
-        name: user.nome,
-        email: user.email,
-        sector: user.setor,
-        setor: user.setor,
-        role: user.role || 'colaborador',
-        avatar: user.avatar_url || user.foto,
-      };
-      done(null, normalizedUser);
-    } else {
-      console.log('🔐 [PASSPORT] User not found during deserialization:', id);
-      done(null, false);
-    }
-  } catch (error) {
-    console.error('🔐 [PASSPORT] Error during deserialization:', error);
-    done(error);
-  }
-});
 
 // Passport initialization
 app.use(passport.initialize());
@@ -585,10 +555,14 @@ app.post('/auth/logout', isAuthenticated, (req, res, next) => {
 });
 
 app.get('/api/me', (req, res) => {
+  console.log('🔐 [ME] Checking authentication for session:', req.session?.id);
+  console.log('🔐 [ME] User in session:', req.user?.email || 'Not authenticated');
+  
   if (req.isAuthenticated()) {
     console.log(`[API] /api/me accessed by: ${req.user.email}`);
     res.json({ user: req.user });
   } else {
+    console.log('🔐 [ME] User not authenticated');
     console.log('[API] /api/me accessed by unauthenticated user.');
     res.status(401).json({ error: 'Não autenticado.' });
   }
