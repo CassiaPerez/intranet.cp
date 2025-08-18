@@ -315,8 +315,17 @@ app.use(cookieParser());
 const ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173').split(',');
 app.use(cors({
   origin: (origin, cb) => {
+    // Allow all origins in development mode
+    if (process.env.NODE_ENV === 'development') {
+      console.log('[CORS] ✅ Development mode - allowing origin:', origin);
+      return cb(null, true);
+    }
+    
     if (!origin) return cb(null, true);
     const ok = ORIGINS.some(o => origin.startsWith(o));
+    if (!ok) {
+      console.log('[CORS] ❌ Origin not allowed:', origin, 'Allowed origins:', ORIGINS);
+    }
     cb(ok ? null : new Error('CORS not allowed'), ok ? true : undefined);
   },
   credentials: true,

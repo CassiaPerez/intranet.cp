@@ -9,12 +9,12 @@
     "dev:frontend": "vite",
     "clean:db": "rm -f data/database.sqlite*",
     "dev:full": "concurrently \"npm run server\" \"npm run dev:frontend\"",
-    "dev:backend": "node server.cjs",
+    "dev:backend": "NODE_ENV=development node server.cjs",
     "dev:separate": "echo 'Run: npm run dev (terminal 1) && npm run dev:backend (terminal 2)'",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "server": "node server.cjs",
+    "server": "NODE_ENV=development node server.cjs",
     "clean-demo": "node scripts/clean-demo.cjs"
   },
   "dependencies": {
