@@ -445,6 +445,47 @@ export const AdminPanel: React.FC = () => {
               </div>
 
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Trocas de Proteínas</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Relatório completo de todas as trocas de proteínas
+                </p>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleExportTrocas('csv')}
+                    className="w-full bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors text-sm"
+                  >
+                    Exportar Trocas CSV
+                  </button>
+                  <button
+                    onClick={() => handleExportTrocas('excel')}
+                    className="w-full bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-colors text-sm"
+                  >
+                    Exportar Trocas Excel
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Solicitações de Equipamentos</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Relatório de todas as solicitações de TI
+                </p>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleExportEquipamentos('csv')}
+                    className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                  >
+                    Exportar Equipamentos CSV
+                  </button>
+                  <button
+                    onClick={() => handleExportEquipamentos('excel')}
+                    className="w-full bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors text-sm"
+                  >
+                    Exportar Equipamentos Excel
+                  </button>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Relatório de Atividades</h3>
                 <p className="text-sm text-gray-600 mb-4">
                   Relatório detalhado de todas as atividades do sistema
@@ -466,22 +507,28 @@ export const AdminPanel: React.FC = () => {
               </div>
 
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Backup do Sistema</h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Outros Relatórios</h3>
                 <p className="text-sm text-gray-600 mb-4">
-                  Fazer backup completo dos dados do sistema
+                  Relatórios adicionais: reservas, portaria, mural
                 </p>
                 <div className="space-y-2">
                   <button
-                    onClick={() => handleExportBackup('json')}
-                    className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                    onClick={() => handleExportReservas('csv')}
+                    className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
                   >
-                    Backup JSON
+                    Exportar Reservas CSV
                   </button>
                   <button
-                    onClick={() => handleExportBackup('sql')}
-                    className="w-full bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors text-sm"
+                    onClick={() => handleExportPortaria('csv')}
+                    className="w-full bg-cyan-600 text-white px-4 py-2 rounded-lg hover:bg-cyan-700 transition-colors text-sm"
                   >
-                    Backup SQL
+                    Exportar Portaria CSV
+                  </button>
+                  <button
+                    onClick={() => handleExportMural('csv')}
+                    className="w-full bg-pink-600 text-white px-4 py-2 rounded-lg hover:bg-pink-700 transition-colors text-sm"
+                  >
+                    Exportar Mural CSV
                   </button>
                 </div>
               </div>
@@ -752,41 +799,169 @@ const handleExportActivities = async (formato: 'csv' | 'excel' | 'pdf') => {
   }
 };
 
-const handleExportBackup = async (formato: 'json' | 'sql') => {
+const handleExportTrocas = async (formato: 'csv' | 'excel') => {
   try {
-    console.log(`[ADMIN] Creating backup as ${formato}...`);
+    console.log(`[ADMIN] Exporting trocas as ${formato}...`);
     
-    const response = await fetch(`/api/admin/export/backup.${formato}`, {
+    const response = await fetch(`/api/admin/export/trocas-proteina.${formato}`, {
       credentials: 'include'
     });
 
     if (response.ok) {
-      if (formato === 'json') {
-        const backupData = await response.json();
-        console.log(`[ADMIN] Backup data tables:`, Object.keys(backupData.data || {}));
-        
-        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.download = `trocas-proteina-${new Date().toISOString().slice(0, 10)}.csv`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(link.href);
-        toast.success('Backup baixado com sucesso!');
+        toast.success('Relatório de trocas de proteínas baixado!');
       } else {
         const data = await response.json();
-        console.log(`[ADMIN] Backup SQL response:`, data);
-        toast.success(data.message || `Backup ${formato.toUpperCase()} processado`);
+        toast.success(`Trocas exportadas como ${formato.toUpperCase()}`);
+      }
+    } else {
+      toast.error(`Erro ao exportar trocas ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Trocas export error:', error);
+    toast.error('Erro ao exportar trocas de proteínas');
+  }
+};
+
+const handleExportEquipamentos = async (formato: 'csv' | 'excel') => {
+  try {
+    console.log(`[ADMIN] Exporting equipamentos as ${formato}...`);
+    
+    const response = await fetch(`/api/admin/export/equipamentos.${formato}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `equipamentos-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        toast.success('Relatório de equipamentos baixado!');
+      } else {
+        const data = await response.json();
+        toast.success(`Equipamentos exportados como ${formato.toUpperCase()}`);
+      }
+    } else {
+      toast.error(`Erro ao exportar equipamentos ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Equipamentos export error:', error);
+    toast.error('Erro ao exportar solicitações de equipamentos');
+  }
+};
+
+const handleExportReservas = async (formato: 'csv' | 'excel') => {
+  try {
+    console.log(`[ADMIN] Exporting reservas as ${formato}...`);
+    
+    const response = await fetch(`/api/admin/export/reservas.${formato}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `reservas-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        toast.success('Relatório de reservas baixado!');
+      } else {
+        const data = await response.json();
+        toast.success(`Reservas exportadas como ${formato.toUpperCase()}`);
+      }
+    } else {
+      toast.error(`Erro ao exportar reservas ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Reservas export error:', error);
+    toast.error('Erro ao exportar reservas');
+  }
+};
+
+const handleExportPortaria = async (formato: 'csv' | 'excel') => {
+  try {
+    console.log(`[ADMIN] Exporting portaria as ${formato}...`);
+    
+    const response = await fetch(`/api/admin/export/portaria.${formato}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `portaria-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        toast.success('Relatório da portaria baixado!');
+      } else {
+        const data = await response.json();
+        toast.success(`Portaria exportada como ${formato.toUpperCase()}`);
+      }
+    } else {
+      toast.error(`Erro ao exportar portaria ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Portaria export error:', error);
+    toast.error('Erro ao exportar agendamentos da portaria');
+  }
+};
+
+const handleExportMural = async (formato: 'csv' | 'excel') => {
+  try {
+    console.log(`[ADMIN] Exporting mural as ${formato}...`);
+    
+    const response = await fetch(`/api/admin/export/mural.${formato}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `mural-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+        toast.success('Relatório do mural baixado!');
+      } else {
+        const data = await response.json();
+        toast.success(`Mural exportado como ${formato.toUpperCase()}`);
       }
     } else {
       const errorData = await response.json().catch(() => ({}));
-      console.error(`[ADMIN] Backup failed:`, response.status, errorData);
-      toast.error(errorData.error || `Erro ao gerar backup ${formato.toUpperCase()}`);
+      toast.error(`Erro ao exportar mural ${formato.toUpperCase()}`);
     }
   } catch (error) {
-    console.error('Backup export error:', error);
-    toast.error('Erro ao gerar backup');
+    console.error('Mural export error:', error);
+    toast.error('Erro ao exportar posts do mural');
   }
 };
 

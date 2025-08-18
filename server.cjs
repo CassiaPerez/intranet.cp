@@ -917,6 +917,107 @@ app.get('/api/admin/export/:filename', authenticate, async (req, res) => {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename=ranking.csv');
       res.send(csvHeader + csvData);
+    } else if (filename.includes('trocas-proteina.csv')) {
+      const trocas = await dbAll(`
+        SELECT 
+          t.*,
+          u.nome as usuario_nome,
+          u.email as usuario_email,
+          u.setor as usuario_setor
+        FROM trocas_proteina t
+        LEFT JOIN usuarios u ON t.usuario_id = u.id
+        ORDER BY t.created_at DESC
+      `);
+
+      const csvHeader = 'Data,Usuario,Email,Setor,Proteina Original,Proteina Nova,Data Solicitacao\n';
+      const csvData = trocas.map(troca => 
+        `"${troca.data}","${troca.usuario_nome || ''}","${troca.usuario_email || ''}","${troca.usuario_setor || ''}","${troca.proteina_original}","${troca.proteina_nova}","${troca.created_at}"`
+      ).join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=trocas-proteina.csv');
+      res.send(csvHeader + csvData);
+    } else if (filename.includes('equipamentos.csv')) {
+      const equipamentos = await dbAll(`
+        SELECT 
+          s.*,
+          u.nome as usuario_nome,
+          u.email as usuario_email,
+          u.setor as usuario_setor
+        FROM ti_solicitacoes s
+        LEFT JOIN usuarios u ON s.usuario_id = u.id
+        ORDER BY s.created_at DESC
+      `);
+
+      const csvHeader = 'ID,Usuario,Email,Setor,Equipamento,Descricao,Prioridade,Status,Data Solicitacao\n';
+      const csvData = equipamentos.map(eq => 
+        `"${eq.id}","${eq.usuario_nome || ''}","${eq.usuario_email || ''}","${eq.usuario_setor || ''}","${eq.titulo}","${eq.descricao}","${eq.prioridade}","${eq.status}","${eq.created_at}"`
+      ).join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=equipamentos.csv');
+      res.send(csvHeader + csvData);
+    } else if (filename.includes('reservas.csv')) {
+      const reservas = await dbAll(`
+        SELECT 
+          r.*,
+          u.nome as usuario_nome,
+          u.email as usuario_email,
+          u.setor as usuario_setor
+        FROM reservas r
+        LEFT JOIN usuarios u ON r.usuario_id = u.id
+        ORDER BY r.created_at DESC
+      `);
+
+      const csvHeader = 'ID,Usuario,Email,Setor,Sala,Data,Inicio,Fim,Assunto,Status,Data Criacao\n';
+      const csvData = reservas.map(res => 
+        `"${res.id}","${res.usuario_nome || ''}","${res.usuario_email || ''}","${res.usuario_setor || ''}","${res.sala}","${res.data}","${res.inicio}","${res.fim}","${res.assunto}","${res.status}","${res.created_at}"`
+      ).join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=reservas.csv');
+      res.send(csvHeader + csvData);
+    } else if (filename.includes('portaria.csv')) {
+      const agendamentos = await dbAll(`
+        SELECT 
+          p.*,
+          u.nome as responsavel_nome,
+          u.email as responsavel_email,
+          u.setor as responsavel_setor
+        FROM portaria_agendamentos p
+        LEFT JOIN usuarios u ON p.usuario_id = u.id
+        ORDER BY p.created_at DESC
+      `);
+
+      const csvHeader = 'ID,Visitante,Documento,Data Visita,Hora,Responsavel,Email,Setor,Observacao,Status,Data Agendamento\n';
+      const csvData = agendamentos.map(ag => 
+        `"${ag.id}","${ag.visitante}","${ag.documento || ''}","${ag.data}","${ag.hora}","${ag.responsavel_nome || ''}","${ag.responsavel_email || ''}","${ag.responsavel_setor || ''}","${ag.observacao || ''}","${ag.status}","${ag.created_at}"`
+      ).join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=portaria.csv');
+      res.send(csvHeader + csvData);
+    } else if (filename.includes('mural.csv')) {
+      const posts = await dbAll(`
+        SELECT 
+          p.*,
+          u.nome as autor_nome,
+          u.email as autor_email,
+          u.setor as autor_setor,
+          (SELECT COUNT(*) FROM mural_likes l WHERE l.post_id = p.id) as total_likes
+        FROM mural_posts p
+        LEFT JOIN usuarios u ON p.usuario_id = u.id
+        ORDER BY p.created_at DESC
+      `);
+
+      const csvHeader = 'ID,Titulo,Autor,Email,Setor,Conteudo,Likes,Fixado,Ativo,Data Criacao\n';
+      const csvData = posts.map(post => 
+        `"${post.id}","${post.titulo}","${post.autor_nome || ''}","${post.autor_email || ''}","${post.autor_setor || ''}","${post.conteudo?.replace(/"/g, '""') || ''}","${post.total_likes}","${post.pinned ? 'Sim' : 'Não'}","${post.ativo ? 'Sim' : 'Não'}","${post.created_at}"`
+      ).join('\n');
+
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename=mural.csv');
+      res.send(csvHeader + csvData);
     } else {
       res.json({ ok: true, data: [], message: `Export ${filename} simulado` });
     }
