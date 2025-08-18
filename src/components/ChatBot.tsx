@@ -726,7 +726,6 @@ export const ChatBot: React.FC = () => {
               {/* Sugestões inteligentes */}
               <div className="mt-3 flex flex-wrap gap-2">
                 {[
-                  'Quem é o Felipe?',
                   'Cardápio de hoje',
                   'Contatos do RH', 
                   'Como ganho pontos?',
