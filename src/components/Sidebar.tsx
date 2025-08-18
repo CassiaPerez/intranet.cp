@@ -8,6 +8,7 @@ const NAV: NavItem[] = [
   { to: '/', label: 'Dashboard' },
   { to: '/reservas', label: 'Reservas' },
   { to: '/cardapio', label: 'Cardápio' },
+  { to: '/aniversariantes', label: 'Aniversariantes' },
   { to: '/troca-proteina', label: 'Troca de Proteínas' },
   { to: '/diretorio', label: 'Diretório' },
   { to: '/equipamentos', label: 'Equipamentos', adminOnly: true },

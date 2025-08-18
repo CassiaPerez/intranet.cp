@@ -13,6 +13,7 @@ import { Equipamentos } from './pages/Equipamentos';
 import { Mural } from './pages/Mural';
 import { AdminPanel } from './pages/AdminPanel';
 import { TrocaProteinas } from './pages/TrocaProteinas';
+import { Aniversariantes } from './pages/Aniversariantes';
 import './index.css';
 
 function App() {
@@ -76,6 +77,14 @@ function App() {
                 element={
                   <ProtectedRoute>
                     <Mural />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/aniversariantes"
+                element={
+                  <ProtectedRoute>
+                    <Aniversariantes />
                   </ProtectedRoute>
                 }
               />
