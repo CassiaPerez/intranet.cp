@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// server.cjs - Servidor Express simplificado e robusto
+// server.cjs - Servidor Express simplificado e robusto (compatível com Express 5)
 
 const express = require('express');
 const cors = require('cors');
@@ -8,14 +8,14 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
 
-// Configurações básicas
+// ==================== CONFIG BÁSICA ====================
 const app = express();
 const PORT = process.env.PORT || 3005;
 const isDev = process.env.NODE_ENV !== 'production';
 
 console.log('🚀 [INIT] Iniciando servidor simplificado...');
 
-// Criar diretório de dados
+// Diretório de dados
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
@@ -25,25 +25,23 @@ if (!fs.existsSync(dataDir)) {
 // Banco SQLite
 const dbPath = path.join(dataDir, 'database.sqlite');
 console.log('📁 [DB] Caminho do banco:', dbPath);
-
 let db;
 
-// Middleware básico
+// ==================== MIDDLEWARES ====================
 app.use(cors({
   origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
   credentials: true
 }));
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Logs simples
-app.use((req, res, next) => {
+app.use((req, _res, next) => {
   console.log(`📡 [REQ] ${req.method} ${req.path}`);
   next();
 });
 
-// Inicializar banco
+// ==================== BANCO/TABELAS ====================
 const initDB = () => {
   return new Promise((resolve, reject) => {
     db = new sqlite3.Database(dbPath, (err) => {
@@ -52,16 +50,16 @@ const initDB = () => {
         reject(err);
         return;
       }
-      
+
       console.log('✅ [DB] Conectado');
-      
-      // Criar tabelas básicas
+
       const createTables = [
         `CREATE TABLE IF NOT EXISTS usuarios (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           nome TEXT NOT NULL,
           email TEXT UNIQUE NOT NULL,
           senha TEXT,
+          foto TEXT,
           setor TEXT DEFAULT 'Geral',
           role TEXT DEFAULT 'colaborador',
           ativo BOOLEAN DEFAULT 1,
@@ -88,11 +86,11 @@ const initDB = () => {
           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )`
       ];
-      
+
       let completed = 0;
       createTables.forEach(sql => {
-        db.run(sql, (err) => {
-          if (err) console.error('❌ [DB] Erro tabela:', err.message);
+        db.run(sql, (err2) => {
+          if (err2) console.error('❌ [DB] Erro tabela:', err2.message);
           completed++;
           if (completed === createTables.length) {
             createAdminUser().then(resolve).catch(reject);
@@ -103,18 +101,23 @@ const initDB = () => {
   });
 };
 
-// Criar usuário admin
+// Usuário admin padrão
 const createAdminUser = async () => {
   return new Promise((resolve) => {
     db.get('SELECT id FROM usuarios WHERE email = ?', ['admin@grupocropfield.com.br'], async (err, row) => {
+      if (err) {
+        console.error('❌ [DB] Erro ao checar admin:', err.message);
+        resolve();
+        return;
+      }
       if (!row) {
         try {
           const hashedPassword = await bcrypt.hash('admin123', 10);
           db.run(
             'INSERT INTO usuarios (nome, email, senha, setor, role) VALUES (?, ?, ?, ?, ?)',
             ['Administrador', 'admin@grupocropfield.com.br', hashedPassword, 'TI', 'admin'],
-            (err) => {
-              if (err) console.error('❌ [DB] Erro admin:', err.message);
+            (err2) => {
+              if (err2) console.error('❌ [DB] Erro admin:', err2.message);
               else console.log('✅ [DB] Admin criado');
               resolve();
             }
@@ -131,48 +134,48 @@ const createAdminUser = async () => {
   });
 };
 
-// Middleware de auth simples
-const authenticate = (req, res, next) => {
-  // Para desenvolvimento, sempre autenticar como admin
-  req.user = { 
-    id: 1, 
-    nome: 'Administrador', 
-    email: 'admin@grupocropfield.com.br', 
-    setor: 'TI', 
-    role: 'admin' 
+// ==================== AUTH SIMPLES ====================
+const authenticate = (_req, _res, next) => {
+  // Dev: finge usuário admin autenticado
+  _req.user = {
+    id: 1,
+    nome: 'Administrador',
+    email: 'admin@grupocropfield.com.br',
+    setor: 'TI',
+    role: 'admin'
   };
   next();
 };
 
-// ==================== ROTAS BÁSICAS ====================
+// ==================== ROTAS ====================
 
-// Auth
+// ---- Login manual
 app.post('/auth/login', async (req, res) => {
   const { email, password } = req.body;
   console.log('🔐 [AUTH] Login tentativa:', email);
-  
+
   if (!email || !password) {
     return res.status(400).json({ ok: false, error: 'Email e senha obrigatórios' });
   }
-  
+
   try {
     db.get('SELECT * FROM usuarios WHERE email = ? AND ativo = 1', [email], async (err, user) => {
       if (err) {
         console.error('❌ [AUTH] Erro DB:', err);
         return res.status(500).json({ ok: false, error: 'Erro interno' });
       }
-      
+
       if (!user) {
         console.log('❌ [AUTH] Usuário não encontrado');
         return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
       }
-      
-      const isValid = await bcrypt.compare(password, user.senha);
+
+      const isValid = await bcrypt.compare(password, user.senha || '');
       if (!isValid) {
         console.log('❌ [AUTH] Senha incorreta');
         return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
       }
-      
+
       console.log('✅ [AUTH] Login sucesso');
       res.json({
         ok: true,
@@ -183,7 +186,7 @@ app.post('/auth/login', async (req, res) => {
           sector: user.setor,
           setor: user.setor,
           role: user.role,
-          avatar: user.foto
+          avatar: user.foto || null
         }
       });
     });
@@ -193,12 +196,12 @@ app.post('/auth/login', async (req, res) => {
   }
 });
 
-app.get('/auth/google', (req, res) => {
+app.get('/auth/google', (_req, res) => {
   console.log('🔗 [GOOGLE] Redirecionamento solicitado');
   res.json({ ok: false, error: 'Google OAuth não configurado neste ambiente' });
 });
 
-app.post('/auth/logout', (req, res) => {
+app.post('/auth/logout', (_req, res) => {
   console.log('🚪 [AUTH] Logout');
   res.json({ ok: true, message: 'Logout realizado' });
 });
@@ -207,10 +210,10 @@ app.get('/api/me', authenticate, (req, res) => {
   res.json({ ok: true, user: req.user });
 });
 
-// Reservas
-app.get('/api/reservas', authenticate, (req, res) => {
+// ---- Reservas
+app.get('/api/reservas', authenticate, (_req, res) => {
   console.log('📅 [RESERVAS] Listando');
-  
+
   db.all(`
     SELECT r.*, u.nome as responsavel 
     FROM reservas r 
@@ -229,30 +232,30 @@ app.get('/api/reservas', authenticate, (req, res) => {
 app.post('/api/reservas', authenticate, (req, res) => {
   const { sala, data, inicio, fim, assunto } = req.body;
   console.log('📅 [RESERVAS] Criando:', { sala, data, assunto });
-  
+
   if (!sala || !data || !inicio || !fim || !assunto) {
     return res.status(400).json({ ok: false, error: 'Dados incompletos' });
   }
-  
+
   db.run(
     'INSERT INTO reservas (usuario_id, sala, data, inicio, fim, assunto) VALUES (?, ?, ?, ?, ?, ?)',
     [req.user.id, sala, data, inicio, fim, assunto],
-    function(err) {
+    function (err) {
       if (err) {
         console.error('❌ [RESERVAS] Erro:', err);
         return res.status(500).json({ ok: false, error: 'Erro ao criar reserva' });
       }
-      
+
       console.log('✅ [RESERVAS] Criada ID:', this.lastID);
       res.json({ ok: true, id: this.lastID, points: 10 });
     }
   );
 });
 
-// Mural
-app.get('/api/mural/posts', authenticate, (req, res) => {
+// ---- Mural
+app.get('/api/mural/posts', authenticate, (_req, res) => {
   console.log('📢 [MURAL] Listando posts');
-  
+
   db.all(`
     SELECT 
       p.*,
@@ -274,20 +277,20 @@ app.get('/api/mural/posts', authenticate, (req, res) => {
 app.post('/api/mural/posts', authenticate, (req, res) => {
   const { titulo, conteudo, pinned = false } = req.body;
   console.log('📢 [MURAL] Criando post:', titulo);
-  
+
   if (!titulo || !conteudo) {
     return res.status(400).json({ ok: false, error: 'Título e conteúdo obrigatórios' });
   }
-  
+
   db.run(
     'INSERT INTO mural_posts (usuario_id, titulo, conteudo, pinned) VALUES (?, ?, ?, ?)',
     [req.user.id, titulo, conteudo, pinned ? 1 : 0],
-    function(err) {
+    function (err) {
       if (err) {
         console.error('❌ [MURAL] Erro:', err);
         return res.status(500).json({ ok: false, error: 'Erro ao criar post' });
       }
-      
+
       console.log('✅ [MURAL] Post criado ID:', this.lastID);
       res.json({ ok: true, id: this.lastID, points: 15 });
     }
@@ -304,8 +307,8 @@ app.post('/api/mural/:postId/comments', authenticate, (req, res) => {
   res.json({ ok: true, id: Date.now(), points: 3 });
 });
 
-// Trocas de proteína
-app.get('/api/trocas-proteina', authenticate, (req, res) => {
+// ---- Trocas de proteína
+app.get('/api/trocas-proteina', authenticate, (_req, res) => {
   console.log('🍽️ [TROCAS] Listando');
   res.json({ ok: true, trocas: [] });
 });
@@ -316,13 +319,13 @@ app.post('/api/trocas-proteina/bulk', authenticate, (req, res) => {
   res.json({ ok: true, inseridas: trocas?.length || 0, totalPoints: (trocas?.length || 0) * 5 });
 });
 
-// TI
-app.get('/api/ti/solicitacoes', authenticate, (req, res) => {
+// ---- TI
+app.get('/api/ti/solicitacoes', authenticate, (_req, res) => {
   console.log('💻 [TI] Listando todas');
   res.json({ ok: true, solicitacoes: [] });
 });
 
-app.get('/api/ti/minhas', authenticate, (req, res) => {
+app.get('/api/ti/minhas', authenticate, (_req, res) => {
   console.log('💻 [TI] Minhas solicitações');
   res.json({ ok: true, solicitacoes: [] });
 });
@@ -333,8 +336,8 @@ app.post('/api/ti/solicitacoes', authenticate, (req, res) => {
   res.json({ ok: true, id: Date.now(), points: 5 });
 });
 
-// Portaria
-app.get('/api/portaria/agendamentos', authenticate, (req, res) => {
+// ---- Portaria
+app.get('/api/portaria/agendamentos', authenticate, (_req, res) => {
   console.log('🚪 [PORTARIA] Listando');
   res.json({ ok: true, agendamentos: [] });
 });
@@ -345,8 +348,8 @@ app.post('/api/portaria/agendamentos', authenticate, (req, res) => {
   res.json({ ok: true, id: Date.now(), points: 8 });
 });
 
-// Admin
-app.get('/api/admin/dashboard', authenticate, (req, res) => {
+// ---- Admin
+app.get('/api/admin/dashboard', authenticate, (_req, res) => {
   console.log('📊 [ADMIN] Dashboard');
   res.json({
     ok: true,
@@ -364,44 +367,79 @@ app.get('/api/admin/dashboard', authenticate, (req, res) => {
   });
 });
 
-app.get('/api/admin/users', authenticate, (req, res) => {
+// Lista/criação de usuários (agora realmente no banco)
+app.get('/api/admin/users', authenticate, (_req, res) => {
   console.log('👥 [ADMIN] Listando usuários');
-  res.json({ ok: true, users: [] });
+  db.all(
+    `SELECT id, nome, email, foto, setor, role, ativo, pontos, created_at 
+     FROM usuarios ORDER BY created_at DESC`,
+    (err, rows) => {
+      if (err) {
+        console.error('❌ [ADMIN] Erro ao listar usuários:', err.message);
+        return res.status(500).json({ ok: false, error: 'Erro ao listar usuários' });
+      }
+      res.json({ ok: true, users: rows || [] });
+    }
+  );
 });
 
-app.post('/api/admin/users', authenticate, (req, res) => {
+app.post('/api/admin/users', authenticate, async (req, res) => {
   console.log('👥 [ADMIN] Criando usuário');
-  res.json({ ok: true, id: Date.now() });
+  const { nome, email, senha, setor = 'Geral', role = 'colaborador', ativo = 1, foto = null } = req.body || {};
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ ok: false, error: 'nome, email e senha são obrigatórios' });
+  }
+  try {
+    const hashed = await bcrypt.hash(senha, 10);
+    db.run(
+      `INSERT INTO usuarios (nome, email, senha, setor, role, ativo, foto) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [nome, email, hashed, setor, role, ativo ? 1 : 0, foto],
+      function (err) {
+        if (err) {
+          console.error('❌ [ADMIN] Erro ao criar usuário:', err.message);
+          const isUnique = /UNIQUE constraint failed/i.test(err.message);
+          return res.status(isUnique ? 409 : 500).json({ ok: false, error: isUnique ? 'Email já cadastrado' : 'Erro ao criar usuário' });
+        }
+        res.json({ ok: true, id: this.lastID });
+      }
+    );
+  } catch (e) {
+    console.error('❌ [ADMIN] Erro hash/criação:', e.message);
+    res.status(500).json({ ok: false, error: 'Erro interno' });
+  }
 });
 
-app.get('/api/admin/export/*', authenticate, (req, res) => {
-  console.log('📊 [EXPORT] Export solicitado:', req.path);
+// Export (corrigido para Express 5: sem "/*")
+app.get('/api/admin/export/:rest*', authenticate, (req, res) => {
+  console.log('📊 [EXPORT] Export solicitado:', req.params.rest || '');
   res.json({ ok: true, data: [], message: 'Export simulado' });
 });
 
+// ==================== ERROS / 404 ====================
+
 // Middleware de erro
-app.use((error, req, res, next) => {
-  console.error('💥 [ERROR]', error.message);
+app.use((error, _req, res, _next) => {
+  console.error('💥 [ERROR]', error && error.message ? error.message : error);
   if (!res.headersSent) {
     res.status(500).json({ ok: false, error: 'Erro interno' });
   }
 });
 
-// 404 para APIs
-app.use('/api/*', (req, res) => {
+// 404 para APIs (corrigido para Express 5: sem "/api/*")
+app.use('/api', (req, res) => {
   console.log('❌ [404] API não encontrada:', req.path);
-  res.status(404).json({ 
-    ok: false, 
+  res.status(404).json({
+    ok: false,
     error: 'Route not found',
-    path: req.path 
+    path: req.path
   });
 });
 
-// Servir arquivos estáticos se existirem
+// ==================== STATIC / SPA ====================
 app.use(express.static('dist'));
 
-// SPA fallback
-app.get('*', (req, res) => {
+// SPA fallback (Express 5: '(.*)' em vez de '*')
+app.get('(.*)', (_req, res) => {
   const indexPath = path.join(__dirname, 'dist', 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
@@ -410,12 +448,12 @@ app.get('*', (req, res) => {
   }
 });
 
-// Inicializar servidor
+// ==================== START / SHUTDOWN ====================
 const startServer = async () => {
   try {
     console.log('🗄️ [INIT] Inicializando banco...');
     await initDB();
-    
+
     console.log('🌐 [INIT] Iniciando servidor HTTP...');
     const server = app.listen(PORT, '0.0.0.0', () => {
       console.log('');
@@ -429,7 +467,7 @@ const startServer = async () => {
       console.log('🔑 [INFO] Login: admin@grupocropfield.com.br / admin123');
       console.log('');
     });
-    
+
     server.on('error', (error) => {
       if (error.code === 'EADDRINUSE') {
         console.error(`❌ [SERVER] Porta ${PORT} em uso`);
@@ -438,7 +476,7 @@ const startServer = async () => {
         console.error('❌ [SERVER] Erro:', error.message);
       }
     });
-    
+
   } catch (error) {
     console.error('💥 [FATAL] Falha na inicialização:', error.message);
     console.log('🔄 [RETRY] Tentando novamente em 3s...');
@@ -446,12 +484,11 @@ const startServer = async () => {
   }
 };
 
-// Tratamento de erros globais sem encerrar processo
+// Tratamento global
 process.on('uncaughtException', (error) => {
-  console.error('💥 [UNCAUGHT]', error.message);
+  console.error('💥 [UNCAUGHT]', error.message || error);
   console.log('🔄 [RECOVERY] Processo mantido ativo');
 });
-
 process.on('unhandledRejection', (reason) => {
   console.error('💥 [REJECTION]', reason);
   console.log('🔄 [RECOVERY] Processo mantido ativo');
@@ -463,7 +500,6 @@ process.on('SIGTERM', () => {
   if (db) db.close();
   process.exit(0);
 });
-
 process.on('SIGINT', () => {
   console.log('📡 [SIGNAL] SIGINT - Encerrando...');
   if (db) db.close();
