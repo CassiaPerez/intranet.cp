@@ -212,47 +212,94 @@ const db = new sqlite3.Database(dbPath, (err) => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(mural_id, usuario_id),
         FOREIGN KEY (mural_id) REFERENCES mural(id) ON DELETE CASCADE,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela mural_reacoes:', err.message);
-      else console.log('Tabela mural_reacoes verificada/criada.');
-    });
-  }
-});
-
-// Middleware
-app.use(cors({
-  origin: process.env.NODE_ENV === 'development' ? ['http://localhost:5173', 'http://127.0.0.1:5173'] : process.env.FRONTEND_URL,
-  credentials: true,
-}));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
-app.use(morgan('dev')); // Log HTTP requests
-
-// Session middleware for Passport
-const session = require('express-session');
-const SQLiteStore = require('connect-sqlite3')(session);
-
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'secretkey',
-  resave: false,
-  saveUninitialized: false,
-  store: new SQLiteStore({ db: 'sessions.sqlite', table: 'sessions' }),
-  cookie: {
+if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+  console.log('🔧 [AUTH] Configuring Google OAuth strategy...');
+  
+  passport.use(new GoogleStrategy({
+    clientID: process.env.GOOGLE_CLIENT_ID,
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+    callbackURL: process.env.GOOGLE_CALLBACK_URL || "/auth/google/callback"
+  }, async (accessToken, refreshToken, profile, done) => {
+    try {
+      console.log('🔐 [GOOGLE] Profile received:', {
+        id: profile.id,
+        email: profile.emails?.[0]?.value,
+        name: profile.displayName
+      });
+      
+      const email = profile.emails?.[0]?.value;
+      if (!email) {
+        console.error('🔐 [GOOGLE] No email found in profile');
+        return done(new Error('Email não encontrado no perfil Google'));
+      }
+      
+      // Verificar se usuário existe
+      const user = await dbGet('SELECT * FROM usuarios WHERE email = ?', [email]);
+      
+      if (user) {
+        console.log('🔐 [GOOGLE] User found:', user.email);
+        
+        // Normalizar dados do usuário para consistência
+        const normalizedUser = {
+          id: user.id,
+          name: user.nome,
+          email: user.email,
+          sector: user.setor,
+          setor: user.setor,
+          role: user.role || 'colaborador',
+          avatar: user.avatar_url || user.foto,
+        };
+        
+        return done(null, normalizedUser);
+      } else {
+        console.log('🔐 [GOOGLE] User not found, creating new user for:', email);
+        
+        // Criar novo usuário automaticamente
+        const result = await dbRun(
+          'INSERT INTO usuarios (nome, email, setor, role) VALUES (?, ?, ?, ?)',
+          [profile.displayName || 'Usuário Google', email, 'Geral', 'colaborador']
+        );
+        
+        console.log('🔐 [GOOGLE] New user created with ID:', result.lastID);
+        
+        const newUser = await dbGet('SELECT * FROM usuarios WHERE id = ?', [result.lastID]);
+        
+        if (newUser) {
+          const normalizedNewUser = {
+            id: newUser.id,
+            name: newUser.nome,
+            email: newUser.email,
+            sector: newUser.setor,
+            setor: newUser.setor,
+            role: newUser.role || 'colaborador',
+            avatar: newUser.avatar_url || newUser.foto,
+          };
+          
+          return done(null, normalizedNewUser);
+        } else {
+          return done(new Error('Falha ao criar usuário'));
+        }
+      }
+    } catch (error) {
+      console.error('🔐 [GOOGLE] Authentication error:', error);
+      return done(error);
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-    httpOnly: true,
-    sameSite: 'Lax',
-  }
-}));
+  }));
+} else {
+  console.warn('⚠️ [AUTH] Google OAuth not configured - missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET');
+}
 
 // Passport initialization
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Passport Local Strategy (for manual login)
+// Debug das variáveis de ambiente
+console.log('🔧 [AUTH] Checking environment variables...');
+console.log('🔧 [AUTH] GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? 'SET' : 'NOT SET');
+console.log('🔧 [AUTH] GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? 'SET' : 'NOT SET');
+console.log('🔧 [AUTH] GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL || 'NOT SET');
+
+// Estratégia Local
 passport.use(new LocalStrategy({
   usernameField: 'email', // Expects 'email' from the frontend
   passwordField: 'password'
