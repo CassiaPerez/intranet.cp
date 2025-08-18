@@ -403,7 +403,8 @@ export const ChatBot: React.FC = () => {
     const dayMatch = originalMessage.match(/(\d{1,2})\/(\d{1,2})/);
     if (dayMatch) {
       const [, day, month] = dayMatch;
-      const searchDate = `${day.padStart(2, '0')}/${month.padStart(2, '0')}/2025`;
+      const currentYear = new Date().getFullYear();
+      const searchDate = `${day.padStart(2, '0')}/${month.padStart(2, '0')}/${currentYear}`;
       
       const menuItem = cardapio.find(item => item.data === searchDate);
       if (menuItem) {

@@ -409,9 +409,113 @@ app.post('/api/admin/users', authenticate, async (req, res) => {
   }
 });
 
+// Atualizar usuário
+app.patch('/api/admin/users/:userId', authenticate, (req, res) => {
+  const { userId } = req.params;
+  const { nome, email, setor, role, ativo } = req.body;
+  
+  console.log('👥 [ADMIN] Atualizando usuário:', userId);
+  
+  if (!userId) {
+    return res.status(400).json({ ok: false, error: 'ID do usuário é obrigatório' });
+  }
+  
+  const updates = [];
+  const values = [];
+  
+  if (nome !== undefined) {
+    updates.push('nome = ?');
+    values.push(nome);
+  }
+  if (email !== undefined) {
+    updates.push('email = ?');
+    values.push(email);
+  }
+  if (setor !== undefined) {
+    updates.push('setor = ?');
+    values.push(setor);
+  }
+  if (role !== undefined) {
+    updates.push('role = ?');
+    values.push(role);
+  }
+  if (ativo !== undefined) {
+    updates.push('ativo = ?');
+    values.push(ativo ? 1 : 0);
+  }
+  
+  if (updates.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Nenhum campo para atualizar' });
+  }
+  
+  updates.push('updated_at = CURRENT_TIMESTAMP');
+  values.push(userId);
+  
+  const sql = `UPDATE usuarios SET ${updates.join(', ')} WHERE id = ?`;
+  
+  db.run(sql, values, function (err) {
+    if (err) {
+      console.error('❌ [ADMIN] Erro ao atualizar usuário:', err.message);
+      const isUnique = /UNIQUE constraint failed/i.test(err.message);
+      return res.status(isUnique ? 409 : 500).json({ 
+        ok: false, 
+        error: isUnique ? 'Email já está em uso' : 'Erro ao atualizar usuário' 
+      });
+    }
+    
+    if (this.changes === 0) {
+      return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
+    }
+    
+    console.log('✅ [ADMIN] Usuário atualizado:', userId);
+    res.json({ ok: true, changes: this.changes });
+  });
+});
+
+// Resetar senha do usuário
+app.patch('/api/admin/users/:userId/password', authenticate, async (req, res) => {
+  const { userId } = req.params;
+  const { senha } = req.body;
+  
+  console.log('🔑 [ADMIN] Resetando senha do usuário:', userId);
+  
+  if (!userId || !senha) {
+    return res.status(400).json({ ok: false, error: 'ID do usuário e nova senha são obrigatórios' });
+  }
+  
+  if (senha.length < 6) {
+    return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
+  }
+  
+  try {
+    const hashedPassword = await bcrypt.hash(senha, 10);
+    
+    db.run(
+      'UPDATE usuarios SET senha = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+      [hashedPassword, userId],
+      function (err) {
+        if (err) {
+          console.error('❌ [ADMIN] Erro ao resetar senha:', err.message);
+          return res.status(500).json({ ok: false, error: 'Erro ao resetar senha' });
+        }
+        
+        if (this.changes === 0) {
+          return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
+        }
+        
+        console.log('✅ [ADMIN] Senha resetada para usuário:', userId);
+        res.json({ ok: true, message: 'Senha alterada com sucesso' });
+      }
+    );
+  } catch (error) {
+    console.error('❌ [ADMIN] Erro ao fazer hash da senha:', error.message);
+    res.status(500).json({ ok: false, error: 'Erro interno ao processar senha' });
+  }
+});
+
 // Export (corrigido para Express 5: sem "/*")
-app.get('/api/admin/export/:rest*', authenticate, (req, res) => {
-  console.log('📊 [EXPORT] Export solicitado:', req.params.rest || '');
+app.get('/api/admin/export/:filename', authenticate, (req, res) => {
+  console.log('📊 [EXPORT] Export solicitado:', req.params.filename || '');
   res.json({ ok: true, data: [], message: 'Export simulado' });
 });
 
