@@ -1065,6 +1065,121 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+/* ===== Export Ranking ===== */
+app.get('/api/admin/export/ranking.:formato', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  const formato = req.params.formato;
+  const month = req.query.month;
+  
+  console.log('[EXPORT-RANKING] Exporting ranking format:', formato, 'month:', month);
+  
+  if (!['csv', 'excel', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato inválido. Use: csv, excel ou pdf' });
+  }
+
+  // Query para buscar ranking de usuários (simulado - pode ajustar conforme necessário)
+  const query = `
+    SELECT 
+      u.nome,
+      u.email,
+      u.setor,
+      COALESCE(ml.likes, 0) as total_likes,
+      COALESCE(mc.comments, 0) as total_comments,
+      COALESCE(r.reservas, 0) as total_reservas,
+      COALESCE(tp.trocas, 0) as total_trocas,
+      COALESCE(ts.solicitacoes, 0) as total_solicitacoes,
+      (COALESCE(ml.likes, 0) * 2 + 
+       COALESCE(mc.comments, 0) * 3 + 
+       COALESCE(r.reservas, 0) * 10 + 
+       COALESCE(tp.trocas, 0) * 5 + 
+       COALESCE(ts.solicitacoes, 0) * 4) as total_pontos
+    FROM usuarios u
+    LEFT JOIN (
+      SELECT ml.user_id, COUNT(*) as likes 
+      FROM mural_likes ml 
+      GROUP BY ml.user_id
+    ) ml ON u.id = ml.user_id
+    LEFT JOIN (
+      SELECT mc.user_id, COUNT(*) as comments 
+      FROM mural_comments mc 
+      GROUP BY mc.user_id
+    ) mc ON u.id = mc.user_id
+    LEFT JOIN (
+      SELECT r.user_id, COUNT(*) as reservas 
+      FROM reservas r 
+      GROUP BY r.user_id
+    ) r ON u.id = r.user_id
+    LEFT JOIN (
+      SELECT tp.user_email, COUNT(*) as trocas 
+      FROM trocas_proteina tp 
+      GROUP BY tp.user_email
+    ) tp ON u.email = tp.user_email
+    LEFT JOIN (
+      SELECT ts.user_email, COUNT(*) as solicitacoes 
+      FROM ti_solicitacoes ts 
+      GROUP BY ts.user_email
+    ) ts ON u.email = ts.user_email
+    WHERE u.ativo = 1
+    ORDER BY total_pontos DESC, u.nome ASC
+  `;
+
+  db.all(query, (err, rows) => {
+    if (err) {
+      console.error('[EXPORT-RANKING] Database error:', err.message);
+      return res.status(500).json({ ok: false, error: 'Database error' });
+    }
+
+    const dados = rows || [];
+    console.log('[EXPORT-RANKING] Found', dados.length, 'users for ranking');
+
+    if (formato === 'csv') {
+      let csv = 'Posição,Nome,Email,Setor,Likes,Comentários,Reservas,Trocas Proteína,Solicitações TI,Total Pontos\n';
+      dados.forEach((row, index) => {
+        csv += `${index + 1},"${row.nome}","${row.email}","${row.setor}",${row.total_likes},${row.total_comments},${row.total_reservas},${row.total_trocas},${row.total_solicitacoes},${row.total_pontos}\n`;
+      });
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="ranking-${month || 'atual'}.csv"`);
+      return res.send('\ufeff' + csv); // UTF-8 BOM for Excel compatibility
+    }
+
+    if (formato === 'excel') {
+      const excel = dados.map((row, index) => ({
+        'Posição': index + 1,
+        'Nome': row.nome,
+        'Email': row.email,
+        'Setor': row.setor,
+        'Likes': row.total_likes,
+        'Comentários': row.total_comments,
+        'Reservas': row.total_reservas,
+        'Trocas Proteína': row.total_trocas,
+        'Solicitações TI': row.total_solicitacoes,
+        'Total Pontos': row.total_pontos
+      }));
+
+      res.setHeader('Content-Type', 'application/json');
+      return res.json({ ok: true, data: excel, filename: `ranking-${month || 'atual'}.xlsx` });
+    }
+
+    if (formato === 'pdf') {
+      const pdfData = {
+        title: `Ranking de Usuários - ${month || 'Atual'}`,
+        headers: ['Pos.', 'Nome', 'Setor', 'Pontos'],
+        rows: dados.map((row, index) => [
+          index + 1,
+          row.nome,
+          row.setor,
+          row.total_pontos
+        ])
+      };
+
+      res.setHeader('Content-Type', 'application/json');
+      return res.json({ ok: true, data: pdfData, filename: `ranking-${month || 'atual'}.pdf` });
+    }
+
+    res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  });
+});
+
 /* ===== Catch-all API Express 5-friendly ===== */
 // (depois de TODAS as rotas /api/*)
 app.use('/api', (req, res) => {
