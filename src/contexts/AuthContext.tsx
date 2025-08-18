@@ -46,11 +46,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const checkAuth = async () => {
     setLoading(true);
     try {
+      console.log('[AUTH] Starting auth check...');
+      
       // Check if user is stored in localStorage first
       const storedUser = localStorage.getItem('currentUser');
       if (storedUser) {
         try {
           const userData = JSON.parse(storedUser);
+          console.log('[AUTH] Found stored user:', userData.email);
+          
           // Normalize user data structure for compatibility
           if (userData && userData.email) {
             // Ensure both sector and setor exist
@@ -74,6 +78,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             setUser(userData);
             setIsAuthenticated(true);
             setLoading(false);
+            
+            // Verify with backend that session is still valid
+            try {
+              const verifyResponse = await fetch('/api/me', {
+                credentials: 'include'
+              });
+              
+              if (!verifyResponse.ok) {
+                console.log('[AUTH] Session expired, clearing stored user');
+                localStorage.removeItem('currentUser');
+                setUser(null);
+                setIsAuthenticated(false);
+              }
+            } catch (verifyError) {
+              console.log('[AUTH] Cannot verify session with backend, but keeping local auth');
+            }
+            
             return;
           }
         } catch (error) {

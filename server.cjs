@@ -327,8 +327,15 @@ app.use(cors({
 /* ===== Auth ===== */
 const requireAuth = (req, res, next) => {
   console.log('[AUTH] 🔐 Checking authentication...');
+  console.log('[AUTH] Cookies:', req.cookies);
+  console.log('[AUTH] Authorization header:', req.headers.authorization);
+  
   const token = req.cookies.sid || (req.headers.authorization || '').replace('Bearer ', '');
-  if (!token) return res.status(401).json({ ok: false, error: 'Authentication required' });
+  if (!token) {
+    console.log('[AUTH] ❌ No token found in cookies or headers');
+    return res.status(401).json({ ok: false, error: 'Authentication required' });
+  }
+  
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     console.log('[AUTH] ✅ Token valid for user:', decoded.email);
@@ -395,11 +402,13 @@ app.post('/auth/login', (req, res) => {
 
         res.cookie('sid', token, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+          secure: false, // Allow HTTP in development
+          sameSite: 'lax',
           maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
+        console.log('[LOGIN] ✅ Cookie set for user:', emailNormalizado);
+        
         res.json({
           ok: true,
           user: {
@@ -423,6 +432,7 @@ app.post('/auth/logout', (req, res) => {
 });
 
 app.get('/api/me', requireAuth, (req, res) => {
+  console.log('[API/ME] ✅ Authenticated user:', req.user.email);
   res.json({ ok: true, user: req.user, token: req.token });
 });
 

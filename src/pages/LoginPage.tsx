@@ -44,9 +44,17 @@ export const LoginPage: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         
+        // Store user data in localStorage for immediate access
+        if (data.user) {
+          localStorage.setItem('currentUser', JSON.stringify(data.user));
+        }
+        
         toast.success('Login realizado com sucesso!');
-        // Reload to trigger auth check
-        window.location.href = '/';
+        
+        // Use React Router navigation instead of window.location
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
       } else {
         let errorMessage = 'Credenciais inválidas';
         toast.error('Credenciais inválidas');
