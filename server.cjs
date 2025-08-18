@@ -1075,6 +1075,41 @@ app.get('/api/health', (req, res) => {
 });
 
 /* ===== Export Ranking ===== */
+app.get('/api/admin/config', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  console.log('[ADMIN-CONFIG] Loading system configuration...');
+  
+  res.json({
+    ok: true,
+    config: {
+      app_name: 'Grupo Cropfield Portal',
+      version: '1.0.0',
+      environment: process.env.NODE_ENV || 'development',
+      features: {
+        gamification: true,
+        mural: true,
+        reservas: true,
+        ti_solicitacoes: true,
+        trocas_proteina: true,
+        portaria: true,
+        aniversariantes: true,
+        cardapio: true,
+        diretorio: true
+      },
+      limits: {
+        max_file_size: '1mb',
+        max_reserva_days: 30,
+        troca_proteina_deadline_hours: 16
+      },
+      database: {
+        type: 'sqlite',
+        path: DB_PATH,
+        status: 'connected'
+      },
+      timestamp: new Date().toISOString()
+    }
+  });
+});
+
 app.get('/api/admin/export/ranking.:formato', requireAuth, requireRole('admin', 'rh'), (req, res) => {
   const formato = req.params.formato;
   const month = req.query.month;
