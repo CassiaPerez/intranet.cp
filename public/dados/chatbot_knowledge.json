@@ -1,0 +1,149 @@
+[
+  {
+    "id": "horario_funcionamento",
+    "pergunta": "Qual o horário de funcionamento da empresa?",
+    "palavras_chave": ["horário", "funcionamento", "empresa", "trabalho", "expediente", "abrir", "fechar"],
+    "resposta": "O horário de funcionamento é de segunda a sexta-feira, das 8h às 18h. Aos sábados, domingos e feriados a empresa não funciona.",
+    "categoria": "empresa"
+  },
+  {
+    "id": "contato_rh",
+    "pergunta": "Como entro em contato com o RH?",
+    "palavras_chave": ["rh", "recursos humanos", "contato rh", "falar rh"],
+    "resposta": "Você pode entrar em contato com o RH pelos ramais 3162-2713, 3162-2756, 3162-2739, 3162-2750 ou 3162-2718. Também pode consultar o Diretório para ver todos os contatos do setor de RH.",
+    "categoria": "contatos"
+  },
+  {
+    "id": "contato_ti",
+    "pergunta": "Como entro em contato com o TI?",
+    "palavras_chave": ["ti", "tecnologia", "informação", "contato ti", "suporte", "computador"],
+    "resposta": "Para suporte de TI, você pode fazer uma solicitação através do menu 'Equipamentos' na intranet. A equipe de TI será notificada automaticamente e entrará em contato.",
+    "categoria": "contatos"
+  },
+  {
+    "id": "reservar_sala",
+    "pergunta": "Como reservo uma sala?",
+    "palavras_chave": ["reservar", "sala", "reunião", "agendamento", "calendário"],
+    "resposta": "Para reservar uma sala, acesse o menu 'Reservas', selecione a sala desejada (Aquário, Grande, Pequena ou Recepção) e clique no horário desejado no calendário. Preencha os dados da reunião e confirme.",
+    "categoria": "intranet"
+  },
+  {
+    "id": "trocar_proteina",
+    "pergunta": "Como troco a proteína do almoço?",
+    "palavras_chave": ["trocar", "proteína", "almoço", "cardápio", "comida"],
+    "resposta": "Acesse o menu 'Troca de Proteínas', selecione os dias desejados e escolha a nova proteína. Lembre-se: trocas devem ser feitas até 16h do dia anterior! As opções são: Frango, Omelete, Ovo frito ou Ovo cozido.",
+    "categoria": "intranet"
+  },
+  {
+    "id": "agendar_visita",
+    "pergunta": "Como agendo uma visita na portaria?",
+    "palavras_chave": ["agendar", "visita", "portaria", "visitante"],
+    "resposta": "Vá ao menu 'Reservas', clique na aba 'Agendamentos da Portaria' e preencha os dados do visitante: nome, documento, data, hora e observações.",
+    "categoria": "intranet"
+  },
+  {
+    "id": "pontos_gamificacao",
+    "pergunta": "Como funciona o sistema de pontos?",
+    "palavras_chave": ["pontos", "gamificação", "ranking", "nível", "level"],
+    "resposta": "Você ganha pontos por atividades na intranet: curtir posts (2 pts), comentar (3 pts), reservar salas (8 pts), trocar proteínas (5 pts), criar posts (15 pts). Consulte o Dashboard para ver sua pontuação e posição no ranking!",
+    "categoria": "gamificacao"
+  },
+  {
+    "id": "salas_disponiveis",
+    "pergunta": "Quais salas estão disponíveis?",
+    "palavras_chave": ["salas", "disponíveis", "tipos", "capacidade"],
+    "resposta": "Temos 4 salas: Aquário (8 pessoas), Grande (20 pessoas), Pequena (6 pessoas) e Recepção (4 pessoas). Você pode verificar a disponibilidade no calendário de reservas.",
+    "categoria": "instalacoes"
+  },
+  {
+    "id": "setores_empresa",
+    "pergunta": "Quais são os setores da empresa?",
+    "palavras_chave": ["setores", "departamentos", "empresa", "organização"],
+    "resposta": "Os principais setores são: Comercial, Comex, Contabilidade, Crédito, Faturamento, Financeiro, RH e TI. Você pode ver todos os contatos por setor no Diretório.",
+    "categoria": "empresa"
+  },
+  {
+    "id": "mural_publicar",
+    "pergunta": "Como publico no mural?",
+    "palavras_chave": ["publicar", "mural", "post", "informação"],
+    "resposta": "Apenas membros do RH e TI podem publicar no mural. Se você pertence a um desses setores, acesse o menu 'Mural' e clique em 'Nova Publicação'.",
+    "categoria": "intranet"
+  },
+  {
+    "id": "esqueci_senha",
+    "pergunta": "Esqueci minha senha, o que faço?",
+    "palavras_chave": ["esqueci", "senha", "password", "acesso", "login"],
+    "resposta": "Entre em contato com o administrador do sistema ou com o setor de TI para resetar sua senha. Eles podem criar uma nova senha temporária para você.",
+    "categoria": "suporte"
+  },
+  {
+    "id": "aniversariantes",
+    "pergunta": "Como vejo os aniversariantes do mês?",
+    "palavras_chave": ["aniversariantes", "aniversário", "birthday", "comemoração"],
+    "resposta": "Acesse o menu 'Aniversariantes' para ver todos os colaboradores que fazem aniversário no mês atual, incluindo as datas e idades.",
+    "categoria": "intranet"
+  },
+  {
+    "id": "equipamentos_ti",
+    "pergunta": "Como solicito equipamentos de TI?",
+    "palavras_chave": ["equipamentos", "solicitar", "notebook", "computador", "mouse", "teclado"],
+    "resposta": "Acesse o menu 'Equipamentos', selecione o tipo de equipamento (notebook, desktop, smartphone, etc.), defina a prioridade e justifique a necessidade. A solicitação será enviada automaticamente para o TI.",
+    "categoria": "intranet"
+  },
+  {
+    "id": "politica_senhas",
+    "pergunta": "Qual a política de senhas da empresa?",
+    "palavras_chave": ["política", "senhas", "segurança", "password"],
+    "resposta": "As senhas devem ter no mínimo 6 caracteres. Recomendamos usar uma combinação de letras, números e símbolos. Não compartilhe suas credenciais e troque a senha periodicamente.",
+    "categoria": "seguranca"
+  },
+  {
+    "id": "telefones_ramais",
+    "pergunta": "Como encontro telefones e ramais?",
+    "palavras_chave": ["telefones", "ramais", "contatos", "ligação"],
+    "resposta": "Todos os telefones e ramais estão disponíveis no 'Diretório Corporativo'. Você pode filtrar por setor ou cidade para encontrar o contato desejado rapidamente.",
+    "categoria": "contatos"
+  },
+  {
+    "id": "suporte_sistema",
+    "pergunta": "Onde obtenho suporte para usar a intranet?",
+    "palavras_chave": ["suporte", "ajuda", "help", "dúvida", "problema"],
+    "resposta": "Para suporte com a intranet, entre em contato com o setor de TI através do menu 'Equipamentos' ou fale diretamente comigo! Estou aqui para ajudar com dúvidas sobre o sistema.",
+    "categoria": "suporte"
+  },
+  {
+    "id": "backup_dados",
+    "pergunta": "Como são feitos os backups dos dados?",
+    "palavras_chave": ["backup", "dados", "segurança", "informações"],
+    "resposta": "Os backups são realizados automaticamente pelo sistema. Administradores podem gerar backups adicionais através do Painel Admin na aba 'Relatórios'.",
+    "categoria": "seguranca"
+  },
+  {
+    "id": "grupo_cropfield",
+    "pergunta": "O que é o Grupo Cropfield?",
+    "palavras_chave": ["grupo cropfield", "empresa", "sobre", "negócio"],
+    "resposta": "O Grupo Cropfield é uma empresa do agronegócio com operações em várias regiões do Brasil. Atuamos com representação comercial, tecnologia agrícola e soluções para o campo, com equipes em PR, RS, MT, MS, GO, BA, MA, TO, PA, MG e SP.",
+    "categoria": "empresa"
+  },
+  {
+    "id": "localizacoes",
+    "pergunta": "Onde ficam os escritórios da empresa?",
+    "palavras_chave": ["escritórios", "localização", "endereços", "onde fica"],
+    "resposta": "Temos presença em várias cidades: Apucarana-PR (sede), Erechim-RS, Dourados-MS, Nova Mutum-MT, Campo Novo do Parecis-MT, Primavera do Leste-MT, Canarana-MT, Rio Verde-GO, Assis-SP, Uberaba-MG, Luís Eduardo Magalhães-BA, Balsas-MA, Araguaína-TO e Marabá-PA.",
+    "categoria": "empresa"
+  },
+  {
+    "id": "representantes",
+    "pergunta": "Como encontro contatos de representantes?",
+    "palavras_chave": ["representantes", "vendedores", "comercial", "região"],
+    "resposta": "Todos os representantes estão listados no Diretório Corporativo. Use os filtros por cidade para encontrar representantes da sua região de interesse.",
+    "categoria": "contatos"
+  },
+  {
+    "id": "cardapio_semanal",
+    "pergunta": "Qual o cardápio da semana?",
+    "palavras_chave": ["cardápio", "semana", "almoço", "comida", "menu"],
+    "resposta": "Consulte o menu 'Cardápio' para ver o cardápio completo do mês. Lá você encontra todos os pratos, proteínas, acompanhamentos e sobremesas programados.",
+    "categoria": "intranet"
+  }
+]
