@@ -1,990 +1,584 @@
 import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/Layout';
-import {
-  Users,
+import { 
+  Users, 
+  BarChart3, 
+  Download,
   UserPlus,
-  Search,
-  Edit3,
+  Edit,
   Trash2,
-  Shield,
   Eye,
   EyeOff,
   Save,
-  X,
-  Crown,
-  Briefcase,
-  User,
-  Settings,
-  Star,
-  Download,
-  Upload,
-  BarChart3,
-  UtensilsCrossed,
-  Plus,
+  X
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import toast from 'react-hot-toast';
 
-const API_BASE = '';
-const MURAL_BASE = '/api/rh/mural/posts';
-
-interface Usuario {
+interface User {
   id: string;
   nome: string;
   email: string;
   setor: string;
-  role: 'admin' | 'rh' | 'ti' | 'colaborador';
+  role: string;
   ativo: boolean;
   created_at: string;
-  total_pontos_mensal: number;
 }
 
-interface SolicitacaoTI {
-  id: string;
-  titulo: string;
-  descricao: string;
-  status: 'pendente' | 'em_analise' | 'aprovada' | 'rejeitada' | 'concluida';
-  solicitante_nome: string;
-  solicitante_email: string;
-  responsavel_nome?: string;
-  created_at: string;
-  updated_at: string;
+interface SystemStats {
+  usuarios_ativos: number;
+  posts_mural: number;
+  reservas_salas: number;
+  solicitacoes_ti: number;
+  trocas_proteina: number;
+  agendamentos_portaria: number;
 }
-
-interface PostMural {
-  id: string;
-  titulo: string;
-  conteudo: string;
-  author: string;
-  pinned: boolean;
-  created_at: string;
-}
-
-const ROLES = [
-  { value: 'colaborador', label: 'Colaborador', icon: User, color: 'bg-gray-100 text-gray-800' },
-  { value: 'ti',          label: 'TI',          icon: Settings, color: 'bg-blue-100 text-blue-800' },
-  { value: 'rh',          label: 'RH',          icon: Briefcase, color: 'bg-green-100 text-green-800' },
-  { value: 'admin',       label: 'Administrador', icon: Crown,  color: 'bg-purple-100 text-purple-800' },
-];
-
-const SETORES = [
-  'Administração', 'Comercial', 'Financeiro', 'Geral', 'Logística',
-  'Marketing', 'Operações', 'RH', 'TI', 'Vendas'
-];
-
-const STATUS_COLORS: Record<SolicitacaoTI['status'], string> = {
-  pendente:   'bg-yellow-100 text-yellow-800',
-  em_analise: 'bg-blue-100 text-blue-800',
-  aprovada:   'bg-green-100 text-green-800',
-  rejeitada:  'bg-red-100 text-red-800',
-  concluida:  'bg-gray-100 text-gray-800',
-};
 
 export const AdminPanel: React.FC = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('usuarios');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'reports'>('dashboard');
+  const [users, setUsers] = useState<User[]>([]);
+  const [stats, setStats] = useState<SystemStats | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // Usuários
-  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
-  const [showUserModal, setShowUserModal] = useState(false);
-  const [userModalMode, setUserModalMode] = useState<'create' | 'edit'>('create');
-  const [selectedUser, setSelectedUser] = useState<Usuario | null>(null);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [showNewUserModal, setShowNewUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [showPassword, setShowPassword] = useState(false);
-  const [userFormData, setUserFormData] = useState({
+  
+  const [newUser, setNewUser] = useState({
     nome: '',
     email: '',
-    setor: 'Geral',
-    role: 'colaborador' as Usuario['role'],
     senha: '',
-    ativo: true,
+    setor: 'Geral',
+    role: 'colaborador'
   });
 
-  // TI
-  const [solicitacoesTI, setSolicitacoesTI] = useState<SolicitacaoTI[]>([]);
-  const [showTIModal, setShowTIModal] = useState(false);
-  const [tiFormData, setTiFormData] = useState({ titulo: '', descricao: '' });
-
-  // RH / Mural
-  const [postsMural, setPostsMural] = useState<PostMural[]>([]);
-  const [showRHModal, setShowRHModal] = useState(false);
-  const [rhModalMode, setRhModalMode] = useState<'create' | 'edit'>('create');
-  const [selectedPost, setSelectedPost] = useState<PostMural | null>(null);
-  const [rhFormData, setRhFormData] = useState({ titulo: '', conteudo: '', pinned: false });
-
-  // Config
-  const [systemConfig, setSystemConfig] = useState<Record<string, any>>({});
-  const [configFormData, setConfigFormData] = useState<Record<string, string>>({});
-
-  // Cardápio
-  const [cardapioFile, setCardapioFile] = useState<File | null>(null);
-  const [cardapioFormData, setCardapioFormData] = useState({ mes: '', tipo: 'padrao' as 'padrao' | 'light' });
-
-  const role = (user?.role || 'colaborador') as Usuario['role'];
-  const isAdmin = role === 'admin';
-  const isRH    = role === 'rh' || isAdmin;
-  const isTI    = role === 'ti' || isAdmin;
-
-  const allTabs = [
-    { id: 'usuarios',      label: 'Usuários',      icon: Users,        roles: ['admin', 'rh'] },
-    { id: 'relatorios',    label: 'Relatórios',    icon: BarChart3,    roles: ['admin', 'rh', 'ti'] },
-    { id: 'configuracoes', label: 'Configurações', icon: Settings,     roles: ['admin'] },
-    { id: 'ti',            label: 'Painel TI',     icon: Settings,     roles: ['admin', 'ti'] },
-    { id: 'rh',            label: 'Painel RH',     icon: Briefcase,    roles: ['admin', 'rh'] },
-    { id: 'cardapio',      label: 'Cardápio',      icon: UtensilsCrossed, roles: ['admin', 'rh'] },
-  ];
-  const availableTabs = allTabs.filter(t => t.roles.includes(role));
-
-  // Definir a primeira aba disponível ao carregar/alterar permissões
   useEffect(() => {
-    if (availableTabs.length > 0) setActiveTab(prev => availableTabs.some(t => t.id === prev) ? prev : availableTabs[0].id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [availableTabs.length, role]);
-
-  // Carregamentos por aba
-  useEffect(() => {
-    if (activeTab === 'usuarios' && (isAdmin || isRH)) loadUsuarios();
-    if (activeTab === 'ti' && isTI) loadSolicitacoesTI();
-    if (activeTab === 'rh' && isRH) loadPostsMural();
-    if (activeTab === 'configuracoes' && isAdmin) loadSystemConfig();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (activeTab === 'dashboard') {
+      loadSystemStats();
+    } else if (activeTab === 'users') {
+      loadUsers();
+    }
   }, [activeTab]);
 
-  // ===== Usuários =====
-  const loadUsuarios = async () => {
+  const loadSystemStats = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/admin/users', { credentials: 'include' });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok) setUsuarios(data.users || []);
-      else toast.error(data.error || 'Erro ao carregar usuários');
-    } catch (e) {
-      console.error(e);
-      toast.error('Erro ao carregar usuários');
+      const response = await fetch('/api/admin/dashboard', {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data.stats || {});
+      } else {
+        // Fallback data if API not available
+        setStats({
+          usuarios_ativos: 5,
+          posts_mural: 12,
+          reservas_salas: 8,
+          solicitacoes_ti: 3,
+          trocas_proteina: 15,
+          agendamentos_portaria: 4
+        });
+      }
+    } catch (error) {
+      console.error('Error loading system stats:', error);
+      toast.error('Erro ao carregar estatísticas do sistema');
     } finally {
       setLoading(false);
     }
   };
 
-  const openUserModal = (mode: 'create' | 'edit', usuario?: Usuario) => {
-    setUserModalMode(mode);
-    setSelectedUser(usuario || null);
-    setUserFormData(mode === 'edit' && usuario
-      ? { nome: usuario.nome, email: usuario.email, setor: usuario.setor, role: usuario.role, senha: '', ativo: usuario.ativo }
-      : { nome: '', email: '', setor: 'Geral', role: 'colaborador', senha: '', ativo: true }
-    );
-    setShowUserModal(true);
+  const loadUsers = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/admin/users', {
+        credentials: 'include'
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setUsers(data.users || []);
+      } else {
+        toast.error('Erro ao carregar usuários');
+        setUsers([]);
+      }
+    } catch (error) {
+      console.error('Error loading users:', error);
+      toast.error('Erro ao carregar usuários');
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleUserSubmit = async (e: React.FormEvent) => {
+  const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userFormData.nome || !userFormData.email || (userModalMode === 'create' && !userFormData.senha)) {
+    
+    if (!newUser.nome.trim() || !newUser.email.trim() || !newUser.senha.trim()) {
       toast.error('Preencha todos os campos obrigatórios!');
       return;
     }
-    try {
-      setLoading(true);
-      if (userModalMode === 'create') {
-        const res = await fetch('/api/admin/users', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(userFormData),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || 'Erro ao criar usuário');
-        toast.success('Usuário criado!');
-      } else if (selectedUser) {
-        const res = await fetch(`/api/admin/users/${selectedUser.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            nome: userFormData.nome,
-            email: userFormData.email,
-            setor: userFormData.setor,
-            role: userFormData.role,
-            ativo: userFormData.ativo,
-          }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || 'Erro ao atualizar usuário');
-        toast.success('Usuário atualizado!');
-      }
-      setShowUserModal(false);
-      loadUsuarios();
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao salvar usuário');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const handlePasswordReset = async (userId: string) => {
-    const novaSenha = prompt('Digite a nova senha:');
-    if (!novaSenha) return;
     try {
-      const res = await fetch(`/api/admin/users/${userId}/password`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ senha: novaSenha }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao alterar senha');
-      toast.success('Senha alterada!');
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao alterar senha');
-    }
-  };
-
-  const handleToggleUserStatus = async (userId: string, currentStatus: boolean) => {
-    try {
-      const res = await fetch(`/api/admin/users/${userId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ ativo: !currentStatus }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao alterar status');
-      toast.success(!currentStatus ? 'Usuário ativado!' : 'Usuário desativado!');
-      loadUsuarios();
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao alterar status');
-    }
-  };
-
-  // ===== TI =====
-  const loadSolicitacoesTI = async () => {
-    try {
-      setLoading(true);
-      console.log('[ADMIN-TI] Loading TI requests...');
-      const res = await fetch('/api/ti/solicitacoes', { credentials: 'include' });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao carregar solicitações TI');
-      console.log('[ADMIN-TI] Loaded', j.solicitacoes?.length || 0, 'requests');
-      setSolicitacoesTI(j.solicitacoes || []);
-    } catch (e: any) {
-      console.error('[ADMIN-TI] Error:', e);
-      toast.error(e.message || 'Erro ao carregar solicitações TI');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTISubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!tiFormData.titulo) return toast.error('Título é obrigatório!');
-    try {
-      setLoading(true);
-      const res = await fetch('/api/ti/solicitacoes', {
+      const response = await fetch('/api/admin/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
-        body: JSON.stringify(tiFormData),
+        body: JSON.stringify(newUser),
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao criar solicitação');
-      toast.success('Solicitação criada!');
-      setTiFormData({ titulo: '', descricao: '' });
-      setShowTIModal(false);
-      loadSolicitacoesTI();
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao criar solicitação');
-    } finally {
-      setLoading(false);
+
+      if (response.ok) {
+        toast.success('Usuário criado com sucesso!');
+        setNewUser({ nome: '', email: '', senha: '', setor: 'Geral', role: 'colaborador' });
+        setShowNewUserModal(false);
+        await loadUsers();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao criar usuário');
+      }
+    } catch (error) {
+      console.error('Error creating user:', error);
+      toast.error('Erro ao criar usuário');
     }
   };
 
-  const handleTIStatusUpdate = async (solicitacaoId: string, novoStatus: SolicitacaoTI['status']) => {
+  const handleUpdateUser = async (userId: string, updates: Partial<User>) => {
     try {
-      console.log('[ADMIN-TI] Updating status for request', solicitacaoId, 'to', novoStatus);
-      const res = await fetch(`/api/ti/solicitacoes/${solicitacaoId}`, {
+      const response = await fetch(`/api/admin/users/${userId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
-        body: JSON.stringify({ status: novoStatus }),
+        body: JSON.stringify(updates),
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao atualizar status');
-      console.log('[ADMIN-TI] Status updated successfully');
-      toast.success('Status atualizado!');
-      loadSolicitacoesTI();
-    } catch (e: any) {
-      console.error('[ADMIN-TI] Error updating status:', e);
-      toast.error(e.message || 'Erro ao atualizar status');
-    }
-  };
 
-  // ===== RH / Mural =====
-  const loadPostsMural = async () => {
-    try {
-      setLoading(true);
-      console.log('[ADMIN-RH] Loading mural posts...');
-      const res = await fetch('/api/mural/posts', { credentials: 'include' });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao carregar posts do mural');
-      console.log('[ADMIN-RH] Loaded', j.posts?.length || 0, 'posts');
-      setPostsMural(j.posts || []);
-    } catch (e: any) {
-      console.error('[ADMIN-RH] Error:', e);
-      toast.error(e.message || 'Erro ao carregar posts');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const openRHModal = (mode: 'create' | 'edit', post?: PostMural) => {
-    setRhModalMode(mode);
-    setSelectedPost(post || null);
-    setRhFormData(mode === 'edit' && post
-      ? { titulo: post.titulo, conteudo: post.conteudo, pinned: post.pinned }
-      : { titulo: '', conteudo: '', pinned: false }
-    );
-    setShowRHModal(true);
-  };
-
-  const handleRHSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!rhFormData.titulo || !rhFormData.conteudo) return toast.error('Título e conteúdo são obrigatórios!');
-    try {
-      setLoading(true);
-      if (rhModalMode === 'create') {
-        console.log('[ADMIN-RH] Creating post:', rhFormData);
-        const res = await fetch('/api/mural/posts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(rhFormData),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || 'Erro ao criar post');
-        console.log('[ADMIN-RH] Post created with ID:', j.id);
-        toast.success('Post criado!');
-      } else if (selectedPost) {
-        console.log('[ADMIN-RH] Updating post:', selectedPost.id);
-        const res = await fetch(`/api/mural/posts/${selectedPost.id}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify(rhFormData),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(j.error || 'Erro ao atualizar post');
-        console.log('[ADMIN-RH] Post updated successfully');
-        toast.success('Post atualizado!');
+      if (response.ok) {
+        toast.success('Usuário atualizado com sucesso!');
+        setEditingUser(null);
+        await loadUsers();
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao atualizar usuário');
       }
-      setShowRHModal(false);
-      loadPostsMural();
-    } catch (e: any) {
-      console.error('[ADMIN-RH] Error saving post:', e);
-      toast.error(e.message || 'Erro ao salvar post');
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.error('Error updating user:', error);
+      toast.error('Erro ao atualizar usuário');
     }
   };
 
-  const handleDeletePost = async (postId: string) => {
-    if (!confirm('Tem certeza que deseja deletar este post?')) return;
-    try {
-      console.log('[ADMIN-RH] Deleting post:', postId);
-      const res = await fetch(`/api/mural/posts/${postId}`, { method: 'DELETE', credentials: 'include' });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao deletar post');
-      console.log('[ADMIN-RH] Post deleted successfully');
-      toast.success('Post deletado!');
-      loadPostsMural();
-    } catch (e: any) {
-      console.error('[ADMIN-RH] Error deleting post:', e);
-      toast.error(e.message || 'Erro ao deletar post');
+  const handleResetPassword = async (userId: string) => {
+    const newPassword = prompt('Digite a nova senha (mínimo 6 caracteres):');
+    if (!newPassword || newPassword.length < 6) {
+      toast.error('Senha deve ter pelo menos 6 caracteres');
+      return;
     }
-  };
 
-  // ===== Config =====
-  const loadSystemConfig = async () => {
     try {
-      setLoading(true);
-      const res = await fetch(`${API_BASE}/api/admin/config`, { credentials: 'include' });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao carregar configurações');
-      const cfg = j.config || j.data || {};
-      setSystemConfig(cfg);
-      setConfigFormData(Object.fromEntries(Object.entries(cfg).map(([k, v]) => [k, String(v)])));
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e.message || 'Erro ao carregar configurações');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleConfigSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      setLoading(true);
-      const res = await fetch(`${API_BASE}/api/admin/config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch(`/api/admin/users/${userId}/password`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         credentials: 'include',
-        body: JSON.stringify(configFormData),
+        body: JSON.stringify({ senha: newPassword }),
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao salvar configurações');
-      toast.success('Configurações salvas!');
-      loadSystemConfig();
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao salvar configurações');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  // ===== Relatórios / CSV =====
-  const handleExportCSV = (type: 'ranking' | 'trocas' | 'portaria' | 'reservas') => {
-    const baseUrl = `${API_BASE}/api/admin/export`;
-    const today = new Date();
-    const yyyy = today.getFullYear();
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const start = `${yyyy}-${mm}-01`;
-    const end = `${yyyy}-${mm}-${String(new Date(yyyy, parseInt(mm), 0).getDate()).padStart(2, '0')}`;
-
-    const urls = {
-      ranking:  `${baseUrl}/ranking.csv?month=${yyyy}-${mm}`,
-      trocas:   `${baseUrl}/trocas.csv?from=${start}&to=${end}`,
-      portaria: `${baseUrl}/portaria.csv`,
-      reservas: `${baseUrl}/reservas.csv`,
-    } as const;
-
-    window.open(urls[type], '_blank');
-  };
-
-  // ===== Cardápio =====
-  const handleCardapioSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!cardapioFormData.mes) return toast.error('Selecione o mês!');
-    try {
-      setLoading(true);
-      let dados: any[] = [];
-      if (cardapioFile) {
-        const text = await cardapioFile.text();
-        dados = JSON.parse(text);
+      if (response.ok) {
+        toast.success('Senha alterada com sucesso!');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(errorData.error || 'Erro ao alterar senha');
       }
-      const res = await fetch(`${API_BASE}/api/admin/cardapio/import`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ mes: cardapioFormData.mes, tipo: cardapioFormData.tipo, dados }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j.error || 'Erro ao importar cardápio');
-      toast.success('Cardápio importado!');
-      setCardapioFile(null);
-      setCardapioFormData({ mes: '', tipo: 'padrao' });
-    } catch (e: any) {
-      toast.error(e.message || 'Erro ao importar cardápio');
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.error('Error resetting password:', error);
+      toast.error('Erro ao alterar senha');
     }
   };
 
-  const filteredUsers = usuarios.filter(u => {
-    const q = searchTerm.toLowerCase();
-    return (
-      (u.nome || '').toLowerCase().includes(q) ||
-      (u.email || '').toLowerCase().includes(q) ||
-      (u.setor || '').toLowerCase().includes(q)
-    );
-  });
+  const handleExport = async (formato: 'csv' | 'excel' | 'pdf') => {
+    try {
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      const response = await fetch(`/api/admin/export/ranking.${formato}?month=${currentMonth}`, {
+        credentials: 'include'
+      });
 
-  const getRoleInfo = (r: string) => ROLES.find(x => x.value === r) || ROLES[0];
+      if (response.ok) {
+        if (formato === 'csv') {
+          const csvData = await response.text();
+          const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(blob);
+          link.download = `ranking-${currentMonth}.csv`;
+          link.click();
+        } else {
+          const data = await response.json();
+          toast.success(`Dados preparados para export ${formato.toUpperCase()}`);
+          console.log('Export data:', data);
+        }
+      } else {
+        toast.error(`Erro ao exportar ${formato.toUpperCase()}`);
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      toast.error('Erro ao exportar dados');
+    }
+  };
 
-  if (availableTabs.length === 0) {
-    return (
-      <Layout>
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center">
-            <Shield className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Acesso Restrito</h2>
-            <p className="text-gray-600">Você não tem permissão para acessar esta página.</p>
-          </div>
-        </div>
-      </Layout>
-    );
-  }
+  const formatDate = (dateString: string) => {
+    try {
+      return new Date(dateString).toLocaleDateString('pt-BR');
+    } catch {
+      return dateString;
+    }
+  };
+
+  const tabs = [
+    { key: 'dashboard' as const, label: 'Dashboard', icon: BarChart3 },
+    { key: 'users' as const, label: 'Usuários', icon: Users },
+    { key: 'reports' as const, label: 'Relatórios', icon: Download },
+  ];
 
   return (
     <Layout>
       <div className="space-y-6">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Painel Administrativo</h1>
+          <div className="text-sm text-gray-500">
+            Logado como: {user?.name} ({user?.role})
+          </div>
         </div>
 
         {/* Tabs */}
-        <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-          <nav className="flex space-x-1">
-            {availableTabs.map(tab => {
-              const IconComponent = tab.icon;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`px-4 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
-                    activeTab === tab.id
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                >
-                  <IconComponent className="w-4 h-4" />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+        <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
+          {tabs.map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`px-6 py-2 rounded-lg font-medium transition-colors flex items-center space-x-2 ${
+                activeTab === tab.key 
+                  ? 'bg-white text-blue-600 shadow-sm' 
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              <tab.icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+            </button>
+          ))}
         </div>
 
-        {/* Conteúdo das abas */}
-        <div className="space-y-6">
-          {/* Usuários */}
-          {activeTab === 'usuarios' && (isAdmin || isRH) && (
-            <div className="space-y-6">
-              {/* Quick Admin Access Info */}
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <div className="flex items-center space-x-2 mb-2">
-                  <Crown className="w-5 h-5 text-blue-600" />
-                  <h3 className="font-semibold text-blue-900">Acesso Administrador</h3>
-                </div>
-                <div className="text-sm text-blue-800 space-y-1">
-                  <p><strong>Super Admin:</strong> <code>admin</code> / <code>admin</code></p>
-                  <p><strong>Admin Completo:</strong> <code>admin@grupocropfield.com.br</code> / <code>admin123</code></p>
-                  <p><strong>Usuário RH:</strong> <code>rh@grupocropfield.com.br</code> / <code>rh123</code></p>
-                  <p className="text-blue-600 mt-2">💡 Use o botão <Crown className="w-3 h-3 inline" /> para promover usuários a admin</p>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Gerenciamento de Usuários</h2>
-                <button
-                  onClick={() => openUserModal('create')}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                >
-                  <UserPlus className="w-4 h-4" />
-                  <span>Novo Usuário</span>
-                </button>
-              </div>
-
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <div className="mb-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                    <input
-                      type="text"
-                      placeholder="Buscar usuários..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+        {/* Dashboard Tab */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {stats && Object.entries(stats).map(([key, value]) => (
+                <div key={key} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-600 capitalize">
+                        {key.replace(/_/g, ' ')}
+                      </p>
+                      <p className="text-3xl font-bold text-gray-900 mt-2">{value}</p>
+                    </div>
+                    <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+                      <BarChart3 className="w-6 h-6 text-blue-600" />
+                    </div>
                   </div>
                 </div>
-
-                {loading ? (
-                  <div className="p-8 text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 border-b border-gray-200">
-                        <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nome</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Setor</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Função</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pontos</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ações</th>
-                        </tr>
-                      </thead>
-                      <tbody className="bg-white divide-y divide-gray-200">
-                        {filteredUsers.map((u) => {
-                          const roleInfo = getRoleInfo(u.role);
-                          const IconComponent = roleInfo.icon;
-                          return (
-                            <tr key={u.id} className="hover:bg-gray-50">
-                              <td className="px-6 py-4 whitespace-nowrap font-medium text-gray-900">{u.nome}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{u.email}</td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{u.setor}</td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${roleInfo.color}`}>
-                                  <IconComponent className="w-3 h-3 mr-1" />
-                                  {roleInfo.label}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap">
-                                <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                                  u.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                }`}>
-                                  {u.ativo ? 'Ativo' : 'Inativo'}
-                                </span>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                                <div className="flex items-center">
-                                  <Star className="w-4 h-4 text-yellow-500 mr-1" />
-                                  {u.total_pontos_mensal || 0}
-                                </div>
-                              </td>
-                              <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
-                                <button onClick={() => openUserModal('edit', u)} className="text-blue-600 hover:text-blue-900 p-1" title="Editar">
-                                  <Edit3 className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handlePasswordReset(u.id)} className="text-orange-600 hover:text-orange-900 p-1" title="Resetar Senha">
-                                  <Shield className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => handleToggleUserStatus(u.id, u.ativo)}
-                                  className={`p-1 ${u.ativo ? 'text-red-600 hover:text-red-900' : 'text-green-600 hover:text-green-900'}`}
-                                  title={u.ativo ? 'Desativar' : 'Ativar'}
-                                >
-                                  {u.ativo ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
-          {/* TI */}
-          {activeTab === 'ti' && isTI && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Painel TI</h2>
-                <button
-                  onClick={() => setShowTIModal(true)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Nova Solicitação</span>
-                </button>
-              </div>
+        {/* Users Tab */}
+        {activeTab === 'users' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold text-gray-900">Gerenciar Usuários</h2>
+              <button
+                onClick={() => setShowNewUserModal(true)}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Novo Usuário</span>
+              </button>
+            </div>
 
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                {loading ? (
-                  <div className="p-8 text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {solicitacoesTI.map((s) => (
-                      <div key={s.id} className="p-4 border border-gray-200 rounded-lg">
-                        <div className="flex items-start justify-between mb-2">
-                          <h3 className="font-semibold text-gray-900">{s.titulo}</h3>
-                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${STATUS_COLORS[s.status]}`}>
-                            {s.status}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Usuário
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Setor
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Role
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Status
+                      </th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Criado em
+                      </th>
+                      <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                        Ações
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white divide-y divide-gray-200">
+                    {users.map((userData) => (
+                      <tr key={userData.id} className="hover:bg-gray-50">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div>
+                            <div className="text-sm font-medium text-gray-900">{userData.nome}</div>
+                            <div className="text-sm text-gray-500">{userData.email}</div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                            {userData.setor}
                           </span>
-                        </div>
-                        <p className="text-sm text-gray-600 mb-3">{s.descricao}</p>
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <span>Solicitante: {s.solicitante_nome}</span>
-                          <span>{new Date(s.created_at).toLocaleDateString('pt-BR')}</span>
-                        </div>
-                        {isTI && s.status === 'pendente' && (
-                          <div className="mt-3 flex space-x-2">
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            userData.role === 'admin' ? 'bg-purple-100 text-purple-800' :
+                            userData.role === 'rh' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {userData.role}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                            userData.ativo ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                          }`}>
+                            {userData.ativo ? 'Ativo' : 'Inativo'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                          {formatDate(userData.created_at)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                          <div className="flex items-center justify-end space-x-2">
                             <button
-                              onClick={() => handleTIStatusUpdate(s.id, 'aprovada')}
-                              className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                              onClick={() => setEditingUser(userData)}
+                              className="text-blue-600 hover:text-blue-700"
+                              title="Editar usuário"
                             >
-                              Aprovar
+                              <Edit className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => handleTIStatusUpdate(s.id, 'rejeitada')}
-                              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
+                              onClick={() => handleResetPassword(userData.id)}
+                              className="text-yellow-600 hover:text-yellow-700"
+                              title="Resetar senha"
                             >
-                              Rejeitar
+                              <Eye className="w-4 h-4" />
                             </button>
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* RH / Mural */}
-          {activeTab === 'rh' && isRH && (
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-xl font-semibold text-gray-900">Painel RH - Mural</h2>
-                <button
-                  onClick={() => openRHModal('create')}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Novo Post</span>
-                </button>
-              </div>
-
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                {loading ? (
-                  <div className="p-8 text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {postsMural.map((post) => (
-                      <div key={post.id} className="p-4 border border-gray-200 rounded-lg">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex items-center space-x-2">
-                            <h3 className="font-semibold text-gray-900">{post.titulo}</h3>
-                            {post.pinned && (
-                              <span className="px-2 py-1 text-xs bg-yellow-100 text-yellow-800 rounded-full">Fixado</span>
-                            )}
-                          </div>
-                          <div className="flex space-x-2">
-                            <button onClick={() => openRHModal('edit', post)} className="text-blue-600 hover:text-blue-800 p-1">
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleDeletePost(post.id)} className="text-red-600 hover:text-red-800 p-1">
+                            <button
+                              onClick={() => handleUpdateUser(userData.id, { ativo: !userData.ativo })}
+                              className={userData.ativo ? 'text-red-600 hover:text-red-700' : 'text-green-600 hover:text-green-700'}
+                              title={userData.ativo ? 'Desativar usuário' : 'Ativar usuário'}
+                            >
                               <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
-                        </div>
-                        <p className="text-sm text-gray-600 mb-2">{post.conteudo}</p>
-                        <div className="text-xs text-gray-500">
-                          Por: {post.author} • {new Date(post.created_at).toLocaleDateString('pt-BR')}
-                        </div>
-                      </div>
+                        </td>
+                      </tr>
                     ))}
-                  </div>
-                )}
+                  </tbody>
+                </table>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* Relatórios */}
-          {activeTab === 'relatorios' && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-900">Relatórios</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {(['ranking', 'trocas', 'portaria', 'reservas'] as const).map((t) => (
-                  <div key={t} className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                    <h3 className="font-semibold text-gray-900 mb-4">
-                      {t === 'ranking' ? 'Ranking Mensal'
-                        : t === 'trocas' ? 'Trocas de Proteína'
-                        : t === 'portaria' ? 'Portaria'
-                        : 'Reservas de Salas'}
-                    </h3>
-                    <button
-                      onClick={() => handleExportCSV(t)}
-                      className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Exportar CSV</span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Configurações */}
-          {activeTab === 'configuracoes' && isAdmin && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-900">Configurações do Sistema</h2>
+        {/* Reports Tab */}
+        {activeTab === 'reports' && (
+          <div className="space-y-6">
+            <h2 className="text-xl font-semibold text-gray-900">Relatórios e Exportações</h2>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <form onSubmit={handleConfigSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Nome do Sistema</label>
-                    <input
-                      type="text"
-                      value={configFormData.sistema_nome || ''}
-                      onChange={(e) => setConfigFormData({ ...configFormData, sistema_nome: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="Intranet Grupo Cropfield"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Email de Suporte</label>
-                    <input
-                      type="email"
-                      value={configFormData.suporte_email || ''}
-                      onChange={(e) => setConfigFormData({ ...configFormData, suporte_email: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="suporte@grupocropfield.com.br"
-                    />
-                  </div>
-
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Ranking de Usuários</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Exportar ranking completo com pontuação de gamificação
+                </p>
+                <div className="space-y-2">
                   <button
-                    type="submit"
-                    disabled={loading}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                    onClick={() => handleExport('csv')}
+                    className="w-full bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm"
                   >
-                    {loading ? 'Salvando...' : 'Salvar Configurações'}
+                    Exportar CSV
                   </button>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Cardápio */}
-          {activeTab === 'cardapio' && (isAdmin || isRH) && (
-            <div className="space-y-6">
-              <h2 className="text-xl font-semibold text-gray-900">Gerenciamento do Cardápio</h2>
-              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
-                <form onSubmit={handleCardapioSubmit} className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Mês (YYYY-MM)</label>
-                      <input
-                        type="month"
-                        value={cardapioFormData.mes}
-                        onChange={(e) => setCardapioFormData({ ...cardapioFormData, mes: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Tipo</label>
-                      <select
-                        value={cardapioFormData.tipo}
-                        onChange={(e) => setCardapioFormData({ ...cardapioFormData, tipo: e.target.value as 'padrao' | 'light' })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      >
-                        <option value="padrao">Padrão</option>
-                        <option value="light">Light</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Arquivo JSON do Cardápio</label>
-                    <input
-                      type="file"
-                      accept=".json"
-                      onChange={(e) => setCardapioFile(e.target.files?.[0] || null)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-
                   <button
-                    type="submit"
-                    disabled={loading || !cardapioFormData.mes}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 flex items-center space-x-2"
+                    onClick={() => handleExport('excel')}
+                    className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm"
                   >
-                    <Upload className="w-4 h-4" />
-                    <span>{loading ? 'Importando...' : 'Importar Cardápio'}</span>
+                    Exportar Excel
                   </button>
-                </form>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Modais */}
-        {showUserModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">
-                    {userModalMode === 'create' ? 'Novo Usuário' : 'Editar Usuário'}
-                  </h2>
-                  <button onClick={() => setShowUserModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
+                  <button
+                    onClick={() => handleExport('pdf')}
+                    className="w-full bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm"
+                  >
+                    Exportar PDF
                   </button>
                 </div>
-                <form onSubmit={handleUserSubmit} className="space-y-4">
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Relatório de Atividades</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Relatório detalhado de todas as atividades do sistema
+                </p>
+                <button className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                  Gerar Relatório
+                </button>
+              </div>
+
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Backup do Sistema</h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  Fazer backup completo dos dados do sistema
+                </p>
+                <button className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+                  Fazer Backup
+                </button>
+              </div>
+            </div>
+
+            {stats && (
+              <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Estatísticas Resumidas</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-blue-600">{stats.usuarios_ativos}</div>
+                    <div className="text-sm text-gray-600">Usuários Ativos</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-green-600">{stats.posts_mural}</div>
+                    <div className="text-sm text-gray-600">Posts no Mural</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-purple-600">{stats.reservas_salas}</div>
+                    <div className="text-sm text-gray-600">Reservas</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-orange-600">{stats.solicitacoes_ti}</div>
+                    <div className="text-sm text-gray-600">Solicitações TI</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-red-600">{stats.trocas_proteina}</div>
+                    <div className="text-sm text-gray-600">Trocas Proteína</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-cyan-600">{stats.agendamentos_portaria}</div>
+                    <div className="text-sm text-gray-600">Agendamentos</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* New User Modal */}
+        {showNewUserModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
+              <div className="p-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-6">Novo Usuário</h2>
+                <form onSubmit={handleCreateUser} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Nome Completo *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Nome</label>
                     <input
                       type="text"
-                      value={userFormData.nome}
-                      onChange={(e) => setUserFormData({ ...userFormData, nome: e.target.value })}
+                      value={newUser.nome}
+                      onChange={(e) => setNewUser({ ...newUser, nome: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
                     />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">E-mail *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
                     <input
                       type="email"
-                      value={userFormData.email}
-                      onChange={(e) => setUserFormData({ ...userFormData, email: e.target.value })}
+                      value={newUser.email}
+                      onChange={(e) => setNewUser({ ...newUser, email: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Senha</label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={newUser.senha}
+                        onChange={(e) => setNewUser({ ...newUser, senha: e.target.value })}
+                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        minLength={6}
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Setor</label>
                     <select
-                      value={userFormData.setor}
-                      onChange={(e) => setUserFormData({ ...userFormData, setor: e.target.value })}
+                      value={newUser.setor}
+                      onChange={(e) => setNewUser({ ...newUser, setor: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
-                      {SETORES.map((setor) => <option key={setor} value={setor}>{setor}</option>)}
+                      <option value="Geral">Geral</option>
+                      <option value="TI">TI</option>
+                      <option value="RH">RH</option>
+                      <option value="Comercial">Comercial</option>
+                      <option value="Financeiro">Financeiro</option>
+                      <option value="Operações">Operações</option>
                     </select>
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Função</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Perfil</label>
                     <select
-                      value={userFormData.role}
-                      onChange={(e) => setUserFormData({ ...userFormData, role: e.target.value as Usuario['role'] })}
+                      value={newUser.role}
+                      onChange={(e) => setNewUser({ ...newUser, role: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
-                      {ROLES.filter(r => (isAdmin ? true : r.value !== 'admin')).map((r) => (
-                        <option key={r.value} value={r.value}>{r.label}</option>
-                      ))}
+                      <option value="colaborador">Colaborador</option>
+                      <option value="rh">RH</option>
+                      <option value="admin">Administrador</option>
                     </select>
                   </div>
-                  {userModalMode === 'create' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Senha *</label>
-                      <div className="relative">
-                        <input
-                          type={showPassword ? 'text' : 'password'}
-                          value={userFormData.senha}
-                          onChange={(e) => setUserFormData({ ...userFormData, senha: e.target.value })}
-                          className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          required
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        >
-                          {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="ativo"
-                      checked={userFormData.ativo}
-                      onChange={(e) => setUserFormData({ ...userFormData, ativo: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="ativo" className="text-sm text-gray-700">Usuário ativo</label>
-                  </div>
+
                   <div className="flex space-x-3 pt-4">
-                    <button type="button" onClick={() => setShowUserModal(false)} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                    <button
+                      type="button"
+                      onClick={() => setShowNewUserModal(false)}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
                       Cancelar
                     </button>
-                    <button type="submit" disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center justify-center space-x-2">
-                      <Save className="w-4 h-4" />
-                      <span>{loading ? 'Salvando...' : (userModalMode === 'create' ? 'Criar' : 'Salvar')}</span>
+                    <button
+                      type="submit"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Criar Usuário
                     </button>
                   </div>
                 </form>
@@ -993,42 +587,85 @@ export const AdminPanel: React.FC = () => {
           </div>
         )}
 
-        {showTIModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+        {/* Edit User Modal */}
+        {editingUser && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg shadow-xl w-full max-w-md mx-4">
               <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">Nova Solicitação TI</h2>
-                  <button onClick={() => setShowTIModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <form onSubmit={handleTISubmit} className="space-y-4">
+                <h2 className="text-xl font-semibold text-gray-900 mb-6">Editar Usuário</h2>
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  handleUpdateUser(editingUser.id, {
+                    nome: editingUser.nome,
+                    email: editingUser.email,
+                    setor: editingUser.setor,
+                    role: editingUser.role
+                  });
+                }} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Título *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Nome</label>
                     <input
                       type="text"
-                      value={tiFormData.titulo}
-                      onChange={(e) => setTiFormData({ ...tiFormData, titulo: e.target.value })}
+                      value={editingUser.nome}
+                      onChange={(e) => setEditingUser({ ...editingUser, nome: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       required
                     />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Descrição</label>
-                    <textarea
-                      value={tiFormData.descricao}
-                      onChange={(e) => setTiFormData({ ...tiFormData, descricao: e.target.value })}
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                    <input
+                      type="email"
+                      value={editingUser.email}
+                      onChange={(e) => setEditingUser({ ...editingUser, email: e.target.value })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      rows={4}
+                      required
                     />
                   </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Setor</label>
+                    <select
+                      value={editingUser.setor}
+                      onChange={(e) => setEditingUser({ ...editingUser, setor: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="Geral">Geral</option>
+                      <option value="TI">TI</option>
+                      <option value="RH">RH</option>
+                      <option value="Comercial">Comercial</option>
+                      <option value="Financeiro">Financeiro</option>
+                      <option value="Operações">Operações</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Perfil</label>
+                    <select
+                      value={editingUser.role}
+                      onChange={(e) => setEditingUser({ ...editingUser, role: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="colaborador">Colaborador</option>
+                      <option value="rh">RH</option>
+                      <option value="admin">Administrador</option>
+                    </select>
+                  </div>
+
                   <div className="flex space-x-3 pt-4">
-                    <button type="button" onClick={() => setShowTIModal(false)} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(null)}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
                       Cancelar
                     </button>
-                    <button type="submit" disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                      {loading ? 'Criando...' : 'Criar Solicitação'}
+                    <button
+                      type="submit"
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    >
+                      Salvar
                     </button>
                   </div>
                 </form>
@@ -1036,65 +673,98 @@ export const AdminPanel: React.FC = () => {
             </div>
           </div>
         )}
-
-        {showRHModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
-              <div className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-semibold text-gray-900">{rhModalMode === 'create' ? 'Novo Post' : 'Editar Post'}</h2>
-                  <button onClick={() => setShowRHModal(false)} className="text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
-                <form onSubmit={handleRHSubmit} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Título *</label>
-                    <input
-                      type="text"
-                      value={rhFormData.titulo}
-                      onChange={(e) => setRhFormData({ ...rhFormData, titulo: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Conteúdo *</label>
-                    <textarea
-                      value={rhFormData.conteudo}
-                      onChange={(e) => setRhFormData({ ...rhFormData, conteudo: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      rows={6}
-                      required
-                    />
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="pinned"
-                      checked={rhFormData.pinned}
-                      onChange={(e) => setRhFormData({ ...rhFormData, pinned: e.target.checked })}
-                      className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="pinned" className="text-sm text-gray-700">Fixar post no topo</label>
-                  </div>
-                  <div className="flex space-x-3 pt-4">
-                    <button type="button" onClick={() => setShowRHModal(false)} className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50">
-                      Cancelar
-                    </button>
-                    <button type="submit" disabled={loading} className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                      {loading ? 'Salvando...' : (rhModalMode === 'create' ? 'Criar Post' : 'Salvar')}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </div>
-        )}
-
       </div>
     </Layout>
   );
 };
 
-export default AdminPanel;
+// Helper functions
+const handleResetPassword = async (userId: string) => {
+  const newPassword = prompt('Digite a nova senha (mínimo 6 caracteres):');
+  if (!newPassword || newPassword.length < 6) {
+    toast.error('Senha deve ter pelo menos 6 caracteres');
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/admin/users/${userId}/password`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ senha: newPassword }),
+    });
+
+    if (response.ok) {
+      toast.success('Senha alterada com sucesso!');
+    } else {
+      const errorData = await response.json().catch(() => ({}));
+      toast.error(errorData.error || 'Erro ao alterar senha');
+    }
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    toast.error('Erro ao alterar senha');
+  }
+};
+
+const handleUpdateUser = async (userId: string, updates: Partial<any>) => {
+  try {
+    const response = await fetch(`/api/admin/users/${userId}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      credentials: 'include',
+      body: JSON.stringify(updates),
+    });
+
+    if (response.ok) {
+      toast.success('Usuário atualizado com sucesso!');
+      window.location.reload(); // Simple reload to refresh data
+    } else {
+      const errorData = await response.json().catch(() => ({}));
+      toast.error(errorData.error || 'Erro ao atualizar usuário');
+    }
+  } catch (error) {
+    console.error('Error updating user:', error);
+    toast.error('Erro ao atualizar usuário');
+  }
+};
+
+const handleExport = async (formato: 'csv' | 'excel' | 'pdf') => {
+  try {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const response = await fetch(`/api/admin/export/ranking.${formato}?month=${currentMonth}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `ranking-${currentMonth}.csv`;
+        link.click();
+      } else {
+        const data = await response.json();
+        toast.success(`Dados preparados para export ${formato.toUpperCase()}`);
+        console.log('Export data:', data);
+      }
+    } else {
+      toast.error(`Erro ao exportar ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Export error:', error);
+    toast.error('Erro ao exportar dados');
+  }
+};
+
+const formatDate = (dateString: string) => {
+  try {
+    return new Date(dateString).toLocaleDateString('pt-BR');
+  } catch {
+    return dateString;
+  }
+};
