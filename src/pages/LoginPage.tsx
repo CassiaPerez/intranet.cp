@@ -8,7 +8,7 @@ const API_BASE = '';
 
 export const LoginPage: React.FC = () => {
   const { isAuthenticated } = useAuth();
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState(''); // Changed from username to email
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -25,7 +25,7 @@ export const LoginPage: React.FC = () => {
   const handleManualLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!username || !password) {
+    if (!email || !password) { // Changed from username to email
       toast.error('Preencha todos os campos!');
       return;
     }
@@ -33,7 +33,7 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
     
     try {
-      console.log('[LOGIN] Tentando login manual para:', username);
+      console.log('[LOGIN] Tentando login manual para:', email); // Changed from username to email
       
       const response = await fetch('/auth/login', {
         method: 'POST',
@@ -41,7 +41,7 @@ export const LoginPage: React.FC = () => {
           'Content-Type': 'application/json',
         },
         credentials: 'include',
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ email, password }), // Changed from username to email
       });
 
       console.log('[LOGIN] Response status:', response.status);
@@ -109,16 +109,16 @@ export const LoginPage: React.FC = () => {
           <form onSubmit={handleManualLogin} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Usuário
+                Email
               </label>
               <div className="relative">
                 <User className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
+                  type="email" // Changed type to email
+                  value={email} // Changed from username to email
+                  onChange={(e) => setEmail(e.target.value)} // Changed from setUsername to setEmail
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Digite seu usuário"
+                  placeholder="Digite seu email" // Changed placeholder
                   required
                 />
               </div>
@@ -160,9 +160,9 @@ export const LoginPage: React.FC = () => {
           <div className="mt-6 text-center">
             <p className="text-sm text-gray-600">
               <strong>Acesso Administrador:</strong><br />
-              <strong>Usuário:</strong> <code>admin</code> | <strong>Senha:</strong> <code>admin</code><br />
+              <strong>Email:</strong> <code>admin@grupocropfield.com.br</code> | <strong>Senha:</strong> <code>admin123</code><br />
               <span className="text-xs text-gray-500">
-                Outros usuários: <code>rh</code>, <code>user</code>, <code>usuario</code>
+                Outros usuários: <code>rh@grupocropfield.com.br</code>, <code>user@grupocropfield.com.br</code>
               </span>
             </p>
           </div>
