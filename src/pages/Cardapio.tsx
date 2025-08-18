@@ -30,11 +30,7 @@ interface ProteinExchange {
 export const Cardapio: React.FC = () => {
   const { user } = useAuth();
   const { addActivity } = useGamification();
-  const [activeTab, setActiveTab] = useState<'padrao' | 'light' | 'trocas'>('padrao');
   const [cardapioPadrao, setCardapioPadrao] = useState<MenuItem[]>([]);
-  const [cardapioLight, setCardapioLight] = useState<MenuItem[]>([]);
-  const [trocasProteina, setTrocasProteina] = useState<{ [key: string]: string }>({});
-  const [proteinExchanges, setProteinExchanges] = useState<ProteinExchange[]>([]);
 
   const currentMonth = new Date();
   const diasUteis = eachDayOfInterval({
@@ -62,69 +58,23 @@ export const Cardapio: React.FC = () => {
     const fetchCardapio = async () => {
       try {
         console.log('[CARDAPIO] Loading menus...');
-        const [resPadrao, resLight] = await Promise.all([
-          fetch('/cardapio/cardapio-agosto-padrao.json').catch(() => ({ ok: false })),
-          fetch('/cardapio/cardapio-agosto-light.json').catch(() => ({ ok: false }))
-        ]);
+        const resPadrao = await fetch('/cardapio/cardapio-agosto-padrao.json').catch(() => ({ ok: false }));
         
         const jsonPadrao = resPadrao.ok ? await resPadrao.json() : [];
-        const jsonLight = resLight.ok ? await resLight.json() : [];
         
         setCardapioPadrao(Array.isArray(jsonPadrao) ? jsonPadrao : []);
-        setCardapioLight(Array.isArray(jsonLight) ? jsonLight : []);
         
-        console.log('[CARDAPIO] Loaded - Padrao:', jsonPadrao?.length, 'Light:', jsonLight?.length);
+        console.log('[CARDAPIO] Loaded - Padrao:', jsonPadrao?.length);
       } catch (err) {
         console.error('Erro ao carregar cardápio:', err);
         toast.error('Erro ao carregar cardápio.');
         setCardapioPadrao([]);
-        setCardapioLight([]);
       }
     };
 
     fetchCardapio();
   }, []);
 
-  const getCardapioAtual = () => activeTab === 'light' ? cardapioLight : cardapioPadrao;
-
-  const handleProteinChange = (data: string, novaProteina: string) => {
-    setTrocasProteina(prev => ({ ...prev, [data]: novaProteina }));
-  };
-
-  const submitAllExchanges = () => {
-    if (Object.keys(trocasProteina).length === 0) {
-      toast.error('Nenhuma troca selecionada!');
-      return;
-    }
-
-    const novasTrocas: ProteinExchange[] = Object.entries(trocasProteina).map(([data, nova]) => {
-      const item = cardapioPadrao.find(c => c.data === data);
-      return {
-        dia: parseInt(data.split('/')[0]),
-        proteinaOriginal: item?.proteina || '',
-        proteinaNova: nova,
-        usuario: user?.name || 'Usuário Atual',
-        data: new Date(),
-      };
-    });
-
-    setProteinExchanges(prev => [...prev, ...novasTrocas]);
-    setTrocasProteina({});
-
-    novasTrocas.forEach(troca => {
-      addActivity('protein_exchange', `Trocou proteína do dia ${troca.dia}`, troca);
-    });
-
-    toast.success(`${novasTrocas.length} trocas enviadas com sucesso!`);
-  };
-
-  const exportExchanges = (formato: 'excel' | 'pdf' | 'csv') => {
-    if (user?.sector !== 'RH') {
-      toast.error('Apenas usuários do RH podem exportar.');
-      return;
-    }
-    toast.success(`Exportado como ${formato.toUpperCase()}`);
-  };
 
   return (
     <Layout>
@@ -139,42 +89,28 @@ export const Cardapio: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
-          {['padrao', 'light', 'trocas'].map(tab => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab as any)}
-              className={`px-6 py-2 rounded-lg font-medium transition-colors ${activeTab === tab ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-600 hover:text-gray-900'}`}
-            >
-              {tab === 'padrao' ? 'Cardápio Padrão' : tab === 'light' ? 'Cardápio Light' : 'Troca de Proteínas'}
-            </button>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {diasUteis.map(date => {
+            const dataStr = format(date, 'dd/MM/yyyy');
+            const item = cardapioPadrao.find(c => c.data === dataStr);
+            if (!item) return (
+              <div key={dataStr} className="bg-white border rounded-xl p-4 text-gray-500 italic">
+                <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-semibold w-fit mb-2">{dataStr}</div>
+                Cardápio não disponível para este dia.
+              </div>
+            );
+
+            return (
+              <div key={item.data} className="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4">
+                <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-semibold w-fit mb-2">{item.data}</div>
+                <h3 className="font-semibold text-gray-900">{item.prato}</h3>
+                <p className="text-sm text-gray-700"><strong>Proteína:</strong> {item.proteina}</p>
+                <p className="text-sm text-gray-700"><strong>Acompanhamentos:</strong> {item.acompanhamentos?.join(', ') || '---'}</p>
+                <p className="text-sm text-gray-700"><strong>Sobremesa:</strong> {item.sobremesa}</p>
+              </div>
+            );
+          })}
         </div>
-
-        {(activeTab === 'padrao' || activeTab === 'light') && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {diasUteis.map(date => {
-              const dataStr = format(date, 'dd/MM/yyyy');
-              const item = getCardapioAtual().find(c => c.data === dataStr);
-              if (!item) return (
-                <div key={dataStr} className="bg-white border rounded-xl p-4 text-gray-500 italic">
-                  <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-semibold w-fit mb-2">{dataStr}</div>
-                  Cardápio não disponível para este dia.
-                </div>
-              );
-
-              return (
-                <div key={item.data} className="bg-white rounded-xl shadow-sm border hover:shadow-md transition p-4">
-                  <div className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm font-semibold w-fit mb-2">{item.data}</div>
-                  <h3 className="font-semibold text-gray-900">{item.prato}</h3>
-                  <p className="text-sm text-gray-700"><strong>Proteína:</strong> {item.proteina}</p>
-                  <p className="text-sm text-gray-700"><strong>Acompanhamentos:</strong> {item.acompanhamentos?.join(', ') || '---'}</p>
-                  <p className="text-sm text-gray-700"><strong>Sobremesa:</strong> {item.sobremesa}</p>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </div>
     </Layout>
   );
