@@ -342,7 +342,13 @@ const requireAuth = (req, res, next) => {
   const token = req.cookies.sid || (req.headers.authorization || '').replace('Bearer ', '');
   if (!token) {
     console.log('[AUTH] ❌ No token found in cookies or headers');
-    return res.status(401).json({ ok: false, error: 'Authentication required' });
+    return res.status(401).json({ 
+      ok: false, 
+      error: 'Authentication required', 
+      details: 'No token found in cookies or headers',
+      cookies: Object.keys(req.cookies || {}),
+      hasAuth: !!req.headers.authorization
+    });
   }
   
   try {
@@ -354,7 +360,11 @@ const requireAuth = (req, res, next) => {
   } catch (error) {
     console.log('[AUTH] ❌ Token verification failed:', error.message);
     res.clearCookie('sid');
-    return res.status(401).json({ ok: false, error: 'Invalid token' });
+    return res.status(401).json({ 
+      ok: false, 
+      error: 'Invalid token',
+      details: error.message
+    });
   }
 };
 
@@ -388,50 +398,73 @@ app.post('/auth/login', (req, res) => {
       if (err) return res.status(500).json({ ok: false, error: 'Database error' });
       if (!user) return res.status(401).json({ ok: false, error: 'Invalid credentials' });
 
+      console.log(`[LOGIN] Usuário encontrado: ${user.email}, senha hash: ${user.senha_hash ? 'existe' : 'não existe'}`);
+
       const hash = user.senha_hash || user.senha; // compat com bancos antigos
       if (!hash) return res.status(401).json({ ok: false, error: 'Invalid credentials' });
 
-      bcrypt.compare(password, hash, (bcryptErr, isValid) => {
-        if (bcryptErr) return res.status(500).json({ ok: false, error: 'Password verification error' });
-        if (!isValid) return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+      // Verificar senha
+      let senhaValida = false;
+      
+      if (user.senha_hash) {
+        // Tentar comparar com hash
+        bcrypt.compare(password, user.senha_hash, (bcryptErr, isValid) => {
+          if (bcryptErr) {
+            console.log(`[LOGIN] Erro bcrypt, tentando comparação direta: ${bcryptErr.message}`);
+            // Fallback: comparação direta (para senhas não hashadas)
+            senhaValida = password === user.senha;
+          } else {
+            senhaValida = isValid;
+            console.log(`[LOGIN] Comparação bcrypt: ${senhaValida}`);
+          }
 
-        const token = jwt.sign(
-          {
-            id: user.id,
-            username: user.username,
-            name: user.nome,
-            email: user.email,
-            setor: user.setor,
-            sector: user.setor,
-            role: user.role
-          },
-          JWT_SECRET,
-          { expiresIn: '7d' }
-        );
+          if (!senhaValida) {
+            console.log(`[LOGIN] ❌ Senha inválida para: ${loginField}`);
+            return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+          }
 
-        res.cookie('sid', token, {
-          httpOnly: true,
-          secure: false, // Allow HTTP in development
-          sameSite: 'lax',
-          maxAge: 7 * 24 * 60 * 60 * 1000
+          const token = jwt.sign(
+            {
+              id: user.id,
+              username: user.username,
+              name: user.nome,
+              email: user.email,
+              setor: user.setor,
+              sector: user.setor,
+              role: user.role
+            },
+            JWT_SECRET,
+            { expiresIn: '7d' }
+          );
+
+          res.cookie('sid', token, {
+            httpOnly: true,
+            secure: false, // Allow HTTP in development
+            sameSite: 'lax',
+            maxAge: 7 * 24 * 60 * 60 * 1000
+          });
+
+          console.log('[LOGIN] ✅ Login bem-sucedido para: ', user.email);
+          console.log(`[LOGIN] Cookie config: httpOnly=true, secure=${process.env.NODE_ENV === 'production'}, sameSite=lax`);
+          
+          res.json({
+            ok: true,
+            user: {
+              id: user.id,
+              username: user.username,
+              name: user.nome,
+              email: user.email,
+              sector: user.setor,
+              setor: user.setor,
+              role: user.role
+            },
+            token
+          });
         });
-
-        console.log('[LOGIN] ✅ Cookie set for user:', emailNormalizado);
-        
-        res.json({
-          ok: true,
-          user: {
-            id: user.id,
-            username: user.username,
-            name: user.nome,
-            email: user.email,
-            sector: user.setor,
-            setor: user.setor,
-            role: user.role
-          },
-          token
-        });
-      });
+      } else {
+        console.log(`[LOGIN] Usuário sem senha definida: ${user.email}`);
+        return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+      }
     });
 });
 
@@ -876,6 +909,8 @@ app.get('/api/admin/stats', requireAuth, requireRole('admin', 'rh'), (req, res) 
 
 app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
   console.log('[ADMIN-POST-USER] 👤 Creating user:', req.body?.email || 'no email');
+  console.log(`[ADMIN] Criando usuário:`, req.body);
+  
   const { nome, email, senha, password, setor, role } = req.body;
   const senhaFinal = senha || password;
 
@@ -915,6 +950,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
 
       console.log('[ADMIN-POST-USER] 🔐 Hashing password...');
       const hashed = await bcrypt.hash(senhaFinal, 10);
+      console.log(`[ADMIN] Senha hasheada para ${emailNormalizado}: ${hashed ? 'sim' : 'não'}`);
 
       console.log('[ADMIN-POST-USER] 💾 Inserting user into database...');
       const result = await dbRun(
@@ -924,6 +960,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
       );
 
       console.log('[ADMIN-POST-USER] ✅ User created successfully with ID:', result.lastID);
+      console.log(`[ADMIN] Usuário inserido com ID: ${result.lastID}, changes: ${result.changes}`);
 
       res.status(201).json({
         ok: true,
@@ -1080,6 +1117,7 @@ app.get('/api/admin/export/activities.:formato', requireAuth, requireRole('admin
   const month = req.query.month;
   
   console.log('[EXPORT-ACTIVITIES] Exporting activities format:', formato, 'month:', month);
+  console.log(`[EXPORT] Activities export requested: ${req.params.formato}`);
   
   if (!['csv', 'excel', 'pdf'].includes(formato)) {
     return res.status(400).json({ ok: false, error: 'Formato inválido. Use: csv, excel ou pdf' });
@@ -1148,6 +1186,7 @@ app.get('/api/admin/export/activities.:formato', requireAuth, requireRole('admin
 
     const dados = rows || [];
     console.log('[EXPORT-ACTIVITIES] Found', dados.length, 'activities');
+    console.log(`[EXPORT] Total activities: ${dados.length}`);
 
     if (formato === 'csv') {
       let csv = 'Tipo Atividade,Descrição,Usuário,Email,Setor,Data,Pontos\n';
@@ -1201,6 +1240,7 @@ app.get('/api/admin/export/backup.:formato', requireAuth, requireRole('admin'), 
   const formato = req.params.formato;
   
   console.log('[EXPORT-BACKUP] Exporting backup format:', formato);
+  console.log(`[BACKUP] Backup requested: ${req.params.formato}`);
   
   if (!['json', 'sql'].includes(formato)) {
     return res.status(400).json({ ok: false, error: 'Formato inválido. Use: json ou sql' });
@@ -1233,6 +1273,8 @@ app.get('/api/admin/export/backup.:formato', requireAuth, requireRole('admin'), 
             version: '1.0.0',
             tables: results
           };
+
+          console.log(`[BACKUP] JSON backup size: ${Object.keys(backupData.tables).length} tables`);
 
           res.setHeader('Content-Type', 'application/json');
           res.setHeader('Content-Disposition', `attachment; filename="backup-${new Date().toISOString().slice(0, 10)}.json"`);
@@ -1290,6 +1332,7 @@ app.get('/api/admin/export/ranking.:formato', requireAuth, requireRole('admin', 
   const month = req.query.month;
   
   console.log('[EXPORT-RANKING] Exporting ranking format:', formato, 'month:', month);
+  console.log(`[EXPORT] Ranking export requested: ${req.params.formato}`);
   
   if (!['csv', 'excel', 'pdf'].includes(formato)) {
     return res.status(400).json({ ok: false, error: 'Formato inválido. Use: csv, excel ou pdf' });
@@ -1349,6 +1392,7 @@ app.get('/api/admin/export/ranking.:formato', requireAuth, requireRole('admin', 
 
     const dados = rows || [];
     console.log('[EXPORT-RANKING] Found', dados.length, 'users for ranking');
+    console.log(`[EXPORT] Ranking data: ${dados.length} users`);
 
     if (formato === 'csv') {
       let csv = 'Posição,Nome,Email,Setor,Likes,Comentários,Reservas,Trocas Proteína,Solicitações TI,Total Pontos\n';

@@ -18,7 +18,8 @@ export const LoginPage: React.FC = () => {
   }
 
   const handleGoogleLogin = () => {
-    window.location.href = `${API_BASE}/auth/google`;
+    console.log('[LOGIN] Iniciando login Google...');
+    window.location.href = '/auth/google';
   };
 
   const handleManualLogin = async (e: React.FormEvent) => {
@@ -32,6 +33,8 @@ export const LoginPage: React.FC = () => {
     setLoading(true);
     
     try {
+      console.log('[LOGIN] Tentando login manual para:', username);
+      
       const response = await fetch('/auth/login', {
         method: 'POST',
         headers: {
@@ -41,8 +44,11 @@ export const LoginPage: React.FC = () => {
         body: JSON.stringify({ username, password }),
       });
 
+      console.log('[LOGIN] Response status:', response.status);
+      
       if (response.ok) {
         const data = await response.json();
+        console.log('[LOGIN] Login success:', data.user?.email);
         
         // Store user data in localStorage for immediate access
         if (data.user) {
@@ -56,12 +62,13 @@ export const LoginPage: React.FC = () => {
           window.location.reload();
         }, 500);
       } else {
-        let errorMessage = 'Credenciais inválidas';
-        toast.error('Credenciais inválidas');
+        const errorData = await response.json().catch(() => ({}));
+        console.log('[LOGIN] Login failed:', response.status, errorData);
+        toast.error(errorData.error || 'Credenciais inválidas');
       }
     } catch (error) {
       console.error('Login error:', error);
-      toast.error('Credenciais inválidas');
+      toast.error('Erro de conexão. Tente novamente.');
     } finally {
       setLoading(false);
     }

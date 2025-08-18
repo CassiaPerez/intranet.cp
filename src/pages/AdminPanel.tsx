@@ -201,26 +201,38 @@ export const AdminPanel: React.FC = () => {
 
   const handleExport = async (formato: 'csv' | 'excel' | 'pdf') => {
     try {
+      console.log(`[ADMIN] Exporting ranking as ${formato}...`);
+      
       const currentMonth = new Date().toISOString().slice(0, 7);
       const response = await fetch(`/api/admin/export/ranking.${formato}?month=${currentMonth}`, {
         credentials: 'include'
       });
 
+      console.log(`[ADMIN] Export response status: ${response.status}`);
+      
       if (response.ok) {
         if (formato === 'csv') {
           const csvData = await response.text();
+          console.log(`[ADMIN] CSV data length: ${csvData.length}`);
+          
           const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
           const link = document.createElement('a');
           link.href = URL.createObjectURL(blob);
           link.download = `ranking-${currentMonth}.csv`;
+          document.body.appendChild(link);
           link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(link.href);
+          toast.success('Ranking CSV baixado com sucesso!');
         } else {
           const data = await response.json();
-          toast.success(`Dados preparados para export ${formato.toUpperCase()}`);
-          console.log('Export data:', data);
+          console.log(`[ADMIN] Export data for ${formato}:`, data.data?.length, 'records');
+          toast.success(`Dados exportados como ${formato.toUpperCase()} - ${data.data?.length || 0} registros`);
         }
       } else {
-        toast.error(`Erro ao exportar ${formato.toUpperCase()}`);
+        const errorData = await response.json().catch(() => ({}));
+        console.error(`[ADMIN] Export failed:`, response.status, errorData);
+        toast.error(errorData.error || `Erro ao exportar ${formato.toUpperCase()}`);
       }
     } catch (error) {
       console.error('Export error:', error);
@@ -703,6 +715,8 @@ export const AdminPanel: React.FC = () => {
 // Helper functions
 const handleExportActivities = async (formato: 'csv' | 'excel' | 'pdf') => {
   try {
+    console.log(`[ADMIN] Exporting activities as ${formato}...`);
+    
     const currentMonth = new Date().toISOString().slice(0, 7);
     const response = await fetch(`/api/admin/export/activities.${formato}?month=${currentMonth}`, {
       credentials: 'include'
@@ -711,19 +725,26 @@ const handleExportActivities = async (formato: 'csv' | 'excel' | 'pdf') => {
     if (response.ok) {
       if (formato === 'csv') {
         const csvData = await response.text();
+        console.log(`[ADMIN] Activities CSV data length: ${csvData.length}`);
+        
         const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = `atividades-${currentMonth}.csv`;
+        document.body.appendChild(link);
         link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
         toast.success('Relatório de atividades baixado!');
       } else {
         const data = await response.json();
-        toast.success(`Dados de atividades preparados para ${formato.toUpperCase()}`);
-        console.log('Activities export data:', data);
+        console.log(`[ADMIN] Activities data for ${formato}:`, data.data?.length, 'records');
+        toast.success(`Atividades exportadas como ${formato.toUpperCase()} - ${data.data?.length || 0} registros`);
       }
     } else {
-      toast.error(`Erro ao exportar atividades ${formato.toUpperCase()}`);
+      const errorData = await response.json().catch(() => ({}));
+      console.error(`[ADMIN] Activities export failed:`, response.status, errorData);
+      toast.error(errorData.error || `Erro ao exportar atividades ${formato.toUpperCase()}`);
     }
   } catch (error) {
     console.error('Activities export error:', error);
@@ -733,6 +754,8 @@ const handleExportActivities = async (formato: 'csv' | 'excel' | 'pdf') => {
 
 const handleExportBackup = async (formato: 'json' | 'sql') => {
   try {
+    console.log(`[ADMIN] Creating backup as ${formato}...`);
+    
     const response = await fetch(`/api/admin/export/backup.${formato}`, {
       credentials: 'include'
     });
@@ -740,19 +763,26 @@ const handleExportBackup = async (formato: 'json' | 'sql') => {
     if (response.ok) {
       if (formato === 'json') {
         const backupData = await response.json();
+        console.log(`[ADMIN] Backup data tables:`, Object.keys(backupData.data || {}));
+        
         const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         link.download = `backup-${new Date().toISOString().slice(0, 10)}.json`;
+        document.body.appendChild(link);
         link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
         toast.success('Backup baixado com sucesso!');
       } else {
         const data = await response.json();
+        console.log(`[ADMIN] Backup SQL response:`, data);
         toast.success(data.message || `Backup ${formato.toUpperCase()} processado`);
-        console.log('Backup data:', data);
       }
     } else {
-      toast.error(`Erro ao gerar backup ${formato.toUpperCase()}`);
+      const errorData = await response.json().catch(() => ({}));
+      console.error(`[ADMIN] Backup failed:`, response.status, errorData);
+      toast.error(errorData.error || `Erro ao gerar backup ${formato.toUpperCase()}`);
     }
   } catch (error) {
     console.error('Backup export error:', error);
