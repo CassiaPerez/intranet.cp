@@ -61,16 +61,24 @@ export const Cardapio: React.FC = () => {
   useEffect(() => {
     const fetchCardapio = async () => {
       try {
-        const resPadrao = await fetch('/cardapio/cardapio-agosto-padrao.json');
-        const jsonPadrao = await resPadrao.json();
-        setCardapioPadrao(jsonPadrao || []);
-
-        const resLight = await fetch('/cardapio/cardapio-agosto-light.json');
-        const jsonLight = await resLight.json();
-        setCardapioLight(jsonLight || []);
+        console.log('[CARDAPIO] Loading menus...');
+        const [resPadrao, resLight] = await Promise.all([
+          fetch('/cardapio/cardapio-agosto-padrao.json').catch(() => ({ ok: false })),
+          fetch('/cardapio/cardapio-agosto-light.json').catch(() => ({ ok: false }))
+        ]);
+        
+        const jsonPadrao = resPadrao.ok ? await resPadrao.json() : [];
+        const jsonLight = resLight.ok ? await resLight.json() : [];
+        
+        setCardapioPadrao(Array.isArray(jsonPadrao) ? jsonPadrao : []);
+        setCardapioLight(Array.isArray(jsonLight) ? jsonLight : []);
+        
+        console.log('[CARDAPIO] Loaded - Padrao:', jsonPadrao?.length, 'Light:', jsonLight?.length);
       } catch (err) {
         console.error('Erro ao carregar cardápio:', err);
         toast.error('Erro ao carregar cardápio.');
+        setCardapioPadrao([]);
+        setCardapioLight([]);
       }
     };
 

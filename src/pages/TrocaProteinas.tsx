@@ -112,9 +112,9 @@ export const TrocaProteinas: React.FC = () => {
         const from = format(startOfMonth(hoje), 'yyyy-MM-01');
         const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
         console.log('[TROCAS] Loading existing exchanges from API...');
-        const prevRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, { 
+        const prevRes = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, { 
           headers: getAuthHeadersWithJson(user),
-        });
+        }).catch(() => ({ ok: false }));
         
         if (prevRes.ok) {
           const prev = await prevRes.json();
@@ -137,7 +137,8 @@ export const TrocaProteinas: React.FC = () => {
           setTrocasExistentes(map);
           console.log('[TROCAS] Loaded', Object.keys(map).length, 'existing exchanges');
         } else {
-          console.error('[TROCAS] Failed to load existing exchanges:', prevRes.status);
+          console.log('[TROCAS] API not available for existing exchanges, using empty state');
+          setTrocasExistentes({});
         }
       } catch (e) {
         console.error('[TROCAS] Error loading data:', e);
@@ -333,9 +334,9 @@ export const TrocaProteinas: React.FC = () => {
       // Reload existing exchanges
       const from = format(startOfMonth(hoje), 'yyyy-MM-01');
       const to   = format(endOfMonth(hoje),   'yyyy-MM-dd');
-      const reloadRes = await fetch(`${API_BASE}/api/trocas-proteina?from=${from}&to=${to}`, {
+      const reloadRes = await fetch(`/api/trocas-proteina?from=${from}&to=${to}`, {
         headers: getAuthHeadersWithJson(user),
-      });
+      }).catch(() => ({ ok: false }));
       
       if (reloadRes.ok) {
         const reloadData = await reloadRes.json();
@@ -356,6 +357,8 @@ export const TrocaProteinas: React.FC = () => {
         }
         setTrocasExistentes(map);
         console.log('[TROCAS] Reloaded', Object.keys(map).length, 'existing exchanges');
+      } else {
+        console.log('[TROCAS] Failed to reload exchanges from API');
       }
       
     } catch (error) {

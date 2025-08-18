@@ -23,6 +23,7 @@
     "@fullcalendar/interaction": "^6.1.18",
     "@fullcalendar/react": "^6.1.18",
     "@fullcalendar/timegrid": "^6.1.18",
+    "@supabase/supabase-js": "^2.55.0",
     "axios": "^1.11.0",
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",

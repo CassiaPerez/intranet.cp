@@ -30,17 +30,38 @@ export const Dashboard: React.FC = () => {
 
   const loadDashboardData = async () => {
     try {
-      // Use mock data for now since backend might not be available
-      setPontos({
-        totalPontos: 150,
-        breakdown: [
-          { acao: 'MURAL_LIKE', total: 25, count: 5 },
-          { acao: 'RESERVA_CREATE', total: 50, count: 5 },
-          { acao: 'TROCA_PROTEINA', total: 75, count: 15 }
-        ]
-      });
-      
-      setRanking([]);
+      // Try to load real data from backend
+      try {
+        const response = await fetch('/api/admin/dashboard', {
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[DASHBOARD] Loaded data from API:', data);
+          
+          // Use real data if available
+          setPontos({
+            totalPontos: data.userPoints || 0,
+            breakdown: data.breakdown || []
+          });
+          setRanking(data.ranking || []);
+        } else {
+          throw new Error('API not available');
+        }
+      } catch (apiError) {
+        console.log('[DASHBOARD] API not available, using mock data');
+        // Fallback to mock data
+        setPontos({
+          totalPontos: 150,
+          breakdown: [
+            { acao: 'MURAL_LIKE', total: 25, count: 5 },
+            { acao: 'RESERVA_CREATE', total: 50, count: 5 },
+            { acao: 'TROCA_PROTEINA', total: 75, count: 15 }
+          ]
+        });
+        setRanking([]);
+      }
     } catch (error) {
       console.error('Erro ao carregar dados do dashboard:', error);
       // Use fallback data instead of showing error

@@ -814,6 +814,30 @@ app.post('/api/portaria/agendamentos', requireAuth, (req, res) => {
 });
 
 /* ===== Admin ===== */
+app.get('/api/admin/system-config', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  console.log('[ADMIN] Getting system config...');
+  res.json({
+    ok: true,
+    config: {
+      app_name: 'Intranet Cropfield',
+      version: '1.0.0',
+      database_type: 'SQLite',
+      features_enabled: {
+        mural: true,
+        reservas: true,
+        cardapio: true,
+        equipamentos: true,
+        trocas_proteina: true,
+        portaria: true,
+        aniversariantes: true,
+        gamificacao: true
+      },
+      maintenance_mode: false,
+      last_backup: new Date().toISOString()
+    }
+  });
+});
+
 app.get('/api/admin/users', requireAuth, requireRole('admin', 'rh'), (req, res) => {
   db.all('SELECT id, nome, email, setor, role, ativo, created_at FROM usuarios ORDER BY nome',
     (err, rows) => {
@@ -1019,6 +1043,35 @@ app.post('/api/debug/recreate-users', requireAuth, requireRole('admin'), (req, r
       res.json({ message: 'Demo users recreated', users: users || [], count: users?.length || 0 });
     });
   }).catch((error) => {
+
+// Helper para gerar dados de export
+const generateExportData = async (type) => {
+  const data = {};
+  
+  switch (type) {
+    case 'trocas-proteina':
+      data.rows = await dbAll('SELECT * FROM trocas_proteina ORDER BY created_at DESC');
+      data.headers = ['ID', 'Email', 'Data', 'Proteína Original', 'Proteína Nova', 'Criado em'];
+      break;
+    case 'reservas':
+      data.rows = await dbAll('SELECT * FROM reservas ORDER BY data, inicio');
+      data.headers = ['ID', 'Usuário', 'Sala', 'Data', 'Início', 'Fim', 'Assunto'];
+      break;
+    case 'equipamentos':
+      data.rows = await dbAll('SELECT * FROM ti_solicitacoes ORDER BY created_at DESC');
+      data.headers = ['ID', 'Título', 'Descrição', 'Prioridade', 'Status', 'Email', 'Criado em'];
+      break;
+    case 'portaria':
+      data.rows = await dbAll('SELECT * FROM portaria_agendamentos ORDER BY data, hora');
+      data.headers = ['ID', 'Visitante', 'Documento', 'Data', 'Hora', 'Observação'];
+      break;
+    default:
+      throw new Error('Tipo de export inválido');
+  }
+  
+  return data;
+};
+
     console.error('[DEBUG] Error recreating users:', error);
     res.status(500).json({ error: 'Failed to recreate users' });
   });
@@ -1036,20 +1089,19 @@ app.get('/api/debug/users', (req, res) => {
   });
 });
 
-// Health check route
-app.get('/api/health', (req, res) => {
-  db.get("SELECT 1 as test", (err, row) => {
-    if (err) {
-      return res.status(500).json({
-        ok: false,
-        error: 'Database connection failed',
+    const exportData = await generateExportData(type);
         timestamp: new Date().toISOString()
-      });
+    console.log(`[EXPORT] Generated ${type} export:`, exportData.rows?.length || 0, 'records');
     }
     res.json({
       ok: true,
       status: 'healthy',
-      database: 'connected',
+      filename: `${type}_${new Date().toISOString().split('T')[0]}.${formato}`,
+      records: exportData.rows?.length || 0,
+      headers: exportData.headers,
+      data: exportData.rows,
+      generated_at: new Date().toISOString(),
+      generated_by: req.user.name,
       timestamp: new Date().toISOString()
     });
   });

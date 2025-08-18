@@ -105,7 +105,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
                   if (data.user.email === 'admin@grupocropfield.com.br' || data.user.sector === 'TI' || data.user.setor === 'TI') {
                     data.user.role = 'admin';
                   } else if (data.user.sector === 'RH' || data.user.setor === 'RH') {
-                  // Always include token from API response
+                    data.user.role = 'rh';
                   } else {
                     data.user.role = 'colaborador';
                   }
