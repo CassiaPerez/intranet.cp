@@ -1,1461 +1,1231 @@
+#!/usr/bin/env node
+// server.cjs - Servidor Express robusto com tratamento de erros
+
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const session = require('express-session');
 const morgan = require('morgan');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
-const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const sqlite3 = require('sqlite3').verbose();
 const passport = require('passport');
 const LocalStrategy = require('passport-local').Strategy;
-const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const ExcelJS = require('exceljs');
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
 
-// Load environment variables from .env file
-require('dotenv').config();
-
+// Configurações iniciais
 const app = express();
 const PORT = process.env.PORT || 3005;
-const JWT_SECRET = process.env.JWT_SECRET || 'supersecretjwtkey';
-const GOOGLE_CLIENT_ID = process.env.VITE_GOOGLE_CLIENT_ID;
-const GOOGLE_CLIENT_SECRET = process.env.VITE_GOOGLE_CLIENT_SECRET;
-const GOOGLE_CALLBACK_URL = process.env.VITE_GOOGLE_CALLBACK_URL || 'http://localhost:3005/auth/google/callback';
+const isDev = process.env.NODE_ENV !== 'production';
 
-// Check for Google OAuth credentials
-if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
-  console.warn('⚠️  Google OAuth credentials (VITE_GOOGLE_CLIENT_ID, VITE_GOOGLE_CLIENT_SECRET) are not set. Google login will not work.');
-  console.warn('   Please set them in your .env file and configure your Google Cloud Console project.');
-} else {
-  console.log('✅ Google OAuth credentials loaded.');
+// Criar diretório de dados se não existir
+const dataDir = path.join(__dirname, 'data');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
 }
 
-// Database setup
-const dbPath = path.join(__dirname, 'data', 'database.sqlite');
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Erro ao conectar ao banco de dados SQLite:', err.message);
-  } else {
-    console.log('Conectado ao banco de dados SQLite.');
-    db.run(`
-      CREATE TABLE IF NOT EXISTS usuarios (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        auth_id TEXT UNIQUE,
+// Configuração do banco SQLite
+const dbPath = path.join(dataDir, 'database.sqlite');
+let db;
+
+// Função para inicializar banco com retry
+const initializeDatabase = () => {
+  return new Promise((resolve, reject) => {
+    db = new sqlite3.Database(dbPath, (err) => {
+      if (err) {
+        console.error('❌ [DB] Erro ao conectar SQLite:', err.message);
+        reject(err);
+        return;
+      }
+      
+      console.log('✅ [DB] SQLite conectado:', dbPath);
+      
+      // Criar tabelas se não existirem
+      createTables()
+        .then(() => {
+          console.log('✅ [DB] Tabelas criadas/verificadas');
+          resolve(db);
+        })
+        .catch(reject);
+    });
+  });
+};
+
+// Função para criar tabelas
+const createTables = () => {
+  return new Promise((resolve, reject) => {
+    const queries = [
+      `CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
         nome TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
         senha TEXT,
+        google_id TEXT,
         setor TEXT DEFAULT 'Geral',
-        tipo TEXT DEFAULT 'comum',
-        avatar_url TEXT,
-        pontos_gamificacao INTEGER DEFAULT 0,
+        role TEXT DEFAULT 'colaborador',
+        ativo BOOLEAN DEFAULT 1,
+        foto TEXT,
+        pontos INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `, (err) => {
-      if (err) {
-        console.error('Erro ao criar tabela usuarios:', err.message);
-      } else {
-        console.log('Tabela usuarios verificada/criada.');
-        // Insert default admin user if not exists
-        const adminEmail = 'admin@grupocropfield.com.br';
-        db.get('SELECT id FROM usuarios WHERE email = ?', [adminEmail], (err, row) => {
-          if (err) {
-            console.error('Erro ao verificar admin:', err.message);
-            return;
-          }
-          if (!row) {
-            bcrypt.hash('admin123', 10, (err, hash) => {
-              if (err) {
-                console.error('Erro ao hash da senha do admin:', err.message);
-                return;
-              }
-              db.run(
-                'INSERT INTO usuarios (nome, email, senha, tipo) VALUES (?, ?, ?, ?)',
-                ['Admin', adminEmail, hash, 'admin'],
-                (err) => {
-                  if (err) {
-                    console.error('Erro ao inserir admin padrão:', err.message);
-                  } else {
-                    console.log('Usuário admin padrão inserido.');
-                  }
-                }
-              );
-            });
-          }
-        });
-      }
-    });
-
-    // Create other tables if they don't exist
-    db.run(`
-      CREATE TABLE IF NOT EXISTS gamificacao (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        usuario_id TEXT NOT NULL,
-        acao TEXT NOT NULL,
-        pontos INTEGER DEFAULT 0,
-        modulo TEXT NOT NULL,
-        detalhes JSON,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela gamificacao:', err.message);
-      else console.log('Tabela gamificacao verificada/criada.');
-    });
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS trocas_proteina (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        usuario_id TEXT NOT NULL,
-        data_troca DATE NOT NULL,
-        proteina_original TEXT NOT NULL,
-        proteina_nova TEXT NOT NULL,
-        observacoes TEXT,
-        status TEXT DEFAULT 'pendente',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela trocas_proteina:', err.message);
-      else console.log('Tabela trocas_proteina verificada/criada.');
-    });
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS reservas_salas (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        usuario_id TEXT NOT NULL,
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS reservas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL,
         sala TEXT NOT NULL,
-        data_reserva DATE NOT NULL,
-        hora_inicio TIME NOT NULL,
-        hora_fim TIME NOT NULL,
-        motivo TEXT NOT NULL,
-        observacoes TEXT,
+        data DATE NOT NULL,
+        inicio TIME NOT NULL,
+        fim TIME NOT NULL,
+        assunto TEXT NOT NULL,
         status TEXT DEFAULT 'ativa',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela reservas_salas:', err.message);
-      else console.log('Tabela reservas_salas verificada/criada.');
-    });
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS portaria (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        nome_visitante TEXT NOT NULL,
-        documento TEXT,
-        empresa TEXT,
-        data_visita DATE NOT NULL,
-        hora_entrada TIME NOT NULL,
-        hora_saida TIME,
-        responsavel_id TEXT NOT NULL,
-        setor_destino TEXT NOT NULL,
-        motivo TEXT NOT NULL,
-        observacoes TEXT,
-        status TEXT DEFAULT 'agendada',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (responsavel_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela portaria:', err.message);
-      else console.log('Tabela portaria verificada/criada.');
-    });
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS equipamentos_ti (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        usuario_id TEXT NOT NULL,
-        tipo_equipamento TEXT NOT NULL,
-        descricao TEXT NOT NULL,
-        justificativa TEXT NOT NULL,
-        prioridade TEXT DEFAULT 'média',
-        status TEXT DEFAULT 'pendente',
-        observacoes_ti TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela equipamentos_ti:', err.message);
-      else console.log('Tabela equipamentos_ti verificada/criada.');
-    });
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS mural (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        usuario_id TEXT NOT NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS mural_posts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL,
         titulo TEXT NOT NULL,
         conteudo TEXT NOT NULL,
-        tipo TEXT DEFAULT 'informativo',
-        setor_origem TEXT NOT NULL,
-        anexo_url TEXT,
-        ativo BOOLEAN DEFAULT TRUE,
+        pinned BOOLEAN DEFAULT 0,
+        ativo BOOLEAN DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela mural:', err.message);
-      else console.log('Tabela mural verificada/criada.');
-    });
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS mural_reacoes (
-        id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-        mural_id TEXT NOT NULL,
-        usuario_id TEXT NOT NULL,
-        tipo_reacao TEXT NOT NULL,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS mural_likes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        usuario_id INTEGER NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        UNIQUE(mural_id, usuario_id),
-        FOREIGN KEY (mural_id) REFERENCES mural(id) ON DELETE CASCADE,
-        FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
-      )
-    `, (err) => {
-      if (err) console.error('Erro ao criar tabela mural_reacoes:', err.message);
-      else console.log('Tabela mural_reacoes verificada/criada.');
-    });
-  }
-});
+        FOREIGN KEY (post_id) REFERENCES mural_posts(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id),
+        UNIQUE(post_id, usuario_id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS mural_comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        post_id INTEGER NOT NULL,
+        usuario_id INTEGER NOT NULL,
+        texto TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (post_id) REFERENCES mural_posts(id),
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS trocas_proteina (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL,
+        data DATE NOT NULL,
+        proteina_original TEXT NOT NULL,
+        proteina_nova TEXT NOT NULL,
+        status TEXT DEFAULT 'pendente',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS ti_solicitacoes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL,
+        titulo TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        prioridade TEXT DEFAULT 'medium',
+        status TEXT DEFAULT 'pending',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS portaria_agendamentos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        uuid TEXT UNIQUE,
+        usuario_id INTEGER NOT NULL,
+        visitante TEXT NOT NULL,
+        documento TEXT,
+        data DATE NOT NULL,
+        hora TIME NOT NULL,
+        observacao TEXT,
+        status TEXT DEFAULT 'agendado',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`,
+      
+      `CREATE TABLE IF NOT EXISTS pontos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario_id INTEGER NOT NULL,
+        acao TEXT NOT NULL,
+        pontos INTEGER NOT NULL,
+        detalhes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+      )`
+    ];
 
-// Helper functions for database operations
-const dbGet = (query, params) => {
-  return new Promise((resolve, reject) => {
-    db.get(query, params, (err, row) => {
-      if (err) reject(err);
-      else resolve(row);
+    let completed = 0;
+    const total = queries.length;
+
+    queries.forEach((query, index) => {
+      db.run(query, (err) => {
+        if (err) {
+          console.error(`❌ [DB] Erro na query ${index + 1}:`, err.message);
+          reject(err);
+          return;
+        }
+        
+        completed++;
+        if (completed === total) {
+          createDefaultUsers().then(resolve).catch(reject);
+        }
+      });
     });
   });
 };
 
-const dbRun = (query, params) => {
+// Criar usuários padrão
+const createDefaultUsers = async () => {
   return new Promise((resolve, reject) => {
-    db.run(query, params, function (err) {
-      if (err) reject(err);
-      else resolve(this);
+    // Verificar se já existe usuário admin
+    db.get('SELECT id FROM usuarios WHERE email = ?', ['admin@grupocropfield.com.br'], async (err, row) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      
+      if (!row) {
+        // Criar usuário admin padrão
+        const hashedPassword = await bcrypt.hash('admin123', 10);
+        const uuid = generateUUID();
+        
+        db.run(
+          'INSERT INTO usuarios (uuid, nome, email, senha, setor, role, ativo) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [uuid, 'Administrador', 'admin@grupocropfield.com.br', hashedPassword, 'TI', 'admin', 1],
+          (err) => {
+            if (err) {
+              console.error('❌ [DB] Erro ao criar admin:', err.message);
+              reject(err);
+            } else {
+              console.log('✅ [DB] Usuário admin criado');
+              resolve();
+            }
+          }
+        );
+      } else {
+        console.log('✅ [DB] Usuário admin já existe');
+        resolve();
+      }
     });
   });
 };
 
-// Middleware
+// Utilitários
+const generateUUID = () => `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+// Configuração robusta de middleware
+app.use(morgan(isDev ? 'dev' : 'combined'));
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
+  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://bolt.new'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
 }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
-app.use(morgan('combined'));
 
-// Session configuration
-const session = require('express-session');
-const SQLiteStore = require('connect-sqlite3')(session);
-
+// Configuração de sessão
 app.use(session({
-  store: new SQLiteStore({
-    db: 'sessions.db',
-    dir: path.join(__dirname, 'data')
-  }),
-  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  secret: process.env.SESSION_SECRET || 'cropfield-intranet-2025-secret-key',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
-    httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    secure: false, // HTTP em desenvolvimento
+    maxAge: 24 * 60 * 60 * 1000, // 24 horas
+    httpOnly: true
   }
 }));
 
-// Passport configuration
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
-  console.log('🔧 [AUTH] Configuring Google OAuth strategy...');
-  
-  passport.use(new GoogleStrategy({
-    clientID: process.env.GOOGLE_CLIENT_ID,
-    clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: process.env.GOOGLE_CALLBACK_URL || "/auth/google/callback"
-  }, async (accessToken, refreshToken, profile, done) => {
-    try {
-      console.log('🔐 [GOOGLE] Profile received:', {
-        id: profile.id,
-        email: profile.emails?.[0]?.value,
-        name: profile.displayName
-      });
-      
-      const email = profile.emails?.[0]?.value;
-      if (!email) {
-        console.error('🔐 [GOOGLE] No email found in profile');
-        return done(new Error('Email não encontrado no perfil Google'));
-      }
-      
-      // Verificar se usuário existe
-      const user = await dbGet('SELECT * FROM usuarios WHERE email = ?', [email]);
-      
-      if (user) {
-        console.log('🔐 [GOOGLE] User found:', user.email);
-        
-        // Normalizar dados do usuário para consistência
-        const normalizedUser = {
-          id: user.id,
-          name: user.nome,
-          email: user.email,
-          sector: user.setor,
-          setor: user.setor,
-          role: user.role || 'colaborador',
-          avatar: user.avatar_url || user.foto,
-        };
-        
-        return done(null, normalizedUser);
-      } else {
-        console.log('🔐 [GOOGLE] User not found, creating new user for:', email);
-        
-        // Criar novo usuário automaticamente
-        const result = await dbRun(
-          'INSERT INTO usuarios (nome, email, setor, role) VALUES (?, ?, ?, ?)',
-          [profile.displayName || 'Usuário Google', email, 'Geral', 'colaborador']
-        );
-        
-        console.log('🔐 [GOOGLE] New user created with ID:', result.lastID);
-        
-        const newUser = await dbGet('SELECT * FROM usuarios WHERE id = ?', [result.lastID]);
-        
-        if (newUser) {
-          const normalizedNewUser = {
-            id: newUser.id,
-            name: newUser.nome,
-            email: newUser.email,
-            sector: newUser.setor,
-            setor: newUser.setor,
-            role: newUser.role || 'colaborador',
-            avatar: newUser.avatar_url || newUser.foto,
-          };
-          
-          return done(null, normalizedNewUser);
-        } else {
-          return done(new Error('Falha ao criar usuário'));
-        }
-      }
-    } catch (error) {
-      console.error('🔐 [GOOGLE] Authentication error:', error);
-      return done(error);
-    }
-  }));
-} else {
-  console.warn('⚠️ [AUTH] Google OAuth not configured - missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET');
-}
-
-// Passport initialization
+// Configuração do Passport
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Debug das variáveis de ambiente
-console.log('🔧 [AUTH] Checking environment variables...');
-console.log('🔧 [AUTH] GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID ? 'SET' : 'NOT SET');
-console.log('🔧 [AUTH] GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET ? 'SET' : 'NOT SET');
-console.log('🔧 [AUTH] GOOGLE_CALLBACK_URL:', process.env.GOOGLE_CALLBACK_URL || 'NOT SET');
-
-// Estratégia Local
+// Strategy local
 passport.use(new LocalStrategy({
-  usernameField: 'email', // Expects 'email' from the frontend
+  usernameField: 'email',
   passwordField: 'password'
-}, (email, password, done) => {
-  console.log(`[AUTH] Attempting local login for email: ${email}`);
-  db.get('SELECT * FROM usuarios WHERE email = ?', [email], (err, user) => {
-    if (err) {
-      console.error('[AUTH] Database error during local login:', err.message);
-      return done(err);
-    }
-    if (!user) {
-      console.log(`[AUTH] User not found: ${email}`);
-      return done(null, false, { message: 'Email ou senha incorretos.' });
-    }
-
-    // Compare password
-    if (user.senha) { // Check if password exists (for manual users)
-      bcrypt.compare(password, user.senha, (err, isMatch) => {
-        if (err) {
-          console.error('[AUTH] Bcrypt compare error:', err.message);
-          return done(err);
-        }
-        if (isMatch) {
-          console.log(`[AUTH] Local login successful for user: ${user.email}`);
-          return done(null, user);
-        } else {
-          console.log(`[AUTH] Incorrect password for user: ${user.email}`);
-          return done(null, false, { message: 'Email ou senha incorretos.' });
-        }
-      });
-    } else { // No password set (e.g., Google-only user)
-      console.log(`[AUTH] User ${user.email} has no local password set.`);
-      return done(null, false, { message: 'Este usuário não possui senha local. Tente o login com Google.' });
-    }
-  });
-}));
-
-// Passport Google Strategy
-passport.use(new GoogleStrategy({
-  clientID: GOOGLE_CLIENT_ID,
-  clientSecret: GOOGLE_CLIENT_SECRET,
-  callbackURL: GOOGLE_CALLBACK_URL,
-  scope: ['profile', 'email']
-}, (accessToken, refreshToken, profile, done) => {
-  const email = profile.emails && profile.emails.length > 0 ? profile.emails[0].value : null;
-  const name = profile.displayName;
-  const avatar_url = profile.photos && profile.photos.length > 0 ? profile.photos[0].value : null;
-
-  console.log(`[AUTH] Google login attempt for email: ${email}`);
-
-  if (!email) {
-    console.error('[AUTH] Google profile missing email.');
-    return done(new Error('Google profile missing email.'));
-  }
-
-  db.get('SELECT * FROM usuarios WHERE email = ?', [email], (err, user) => {
-    if (err) {
-      console.error('[AUTH] Database error during Google login:', err.message);
-      return done(err);
-    }
-    if (user) {
-      console.log(`[AUTH] Existing user logged in via Google: ${user.email}`);
-      // Update user info if necessary (e.g., avatar_url)
-      db.run('UPDATE usuarios SET nome = ?, avatar_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [name, avatar_url, user.id], (updateErr) => {
-          if (updateErr) console.error('Error updating user info:', updateErr.message);
-        });
+}, async (email, password, done) => {
+  try {
+    console.log('🔐 [AUTH] Tentativa de login:', email);
+    
+    db.get('SELECT * FROM usuarios WHERE email = ? AND ativo = 1', [email], async (err, user) => {
+      if (err) {
+        console.error('❌ [AUTH] Erro na consulta:', err);
+        return done(err);
+      }
+      
+      if (!user) {
+        console.log('❌ [AUTH] Usuário não encontrado:', email);
+        return done(null, false, { message: 'Email não encontrado' });
+      }
+      
+      if (!user.senha) {
+        console.log('❌ [AUTH] Usuário sem senha (Google only):', email);
+        return done(null, false, { message: 'Use login do Google' });
+      }
+      
+      const isValidPassword = await bcrypt.compare(password, user.senha);
+      if (!isValidPassword) {
+        console.log('❌ [AUTH] Senha incorreta para:', email);
+        return done(null, false, { message: 'Senha incorreta' });
+      }
+      
+      console.log('✅ [AUTH] Login successful:', email);
       return done(null, user);
-    } else {
-      // Create new user
-      console.log(`[AUTH] Creating new user from Google: ${email}`);
-      db.run(
-        'INSERT INTO usuarios (nome, email, avatar_url, tipo, auth_id) VALUES (?, ?, ?, ?, ?)',
-        [name, email, avatar_url, 'comum', profile.id],
-        function (err) {
-          if (err) {
-            console.error('[AUTH] Error creating new Google user:', err.message);
-            return done(err);
-          }
-          const newUserId = this.lastID;
-          db.get('SELECT * FROM usuarios WHERE id = ?', [newUserId], (err, newUser) => {
-            if (err) return done(err);
-            console.log(`[AUTH] New Google user created with ID: ${newUser.id}`);
-            return done(null, newUser);
-          });
-        }
-      );
-    }
-  });
+    });
+  } catch (error) {
+    console.error('❌ [AUTH] Erro no strategy:', error);
+    return done(error);
+  }
 }));
 
-// Passport serialization/deserialization
+// Serialização do usuário
 passport.serializeUser((user, done) => {
-  console.log(`[AUTH] Serializing user: ${user.id}`);
   done(null, user.id);
 });
 
 passport.deserializeUser((id, done) => {
-  console.log(`[AUTH] Deserializing user: ${id}`);
   db.get('SELECT * FROM usuarios WHERE id = ?', [id], (err, user) => {
-    if (err) {
-      console.error('[AUTH] Error deserializing user:', err.message);
-      return done(err);
-    }
-    if (!user) {
-      console.log(`[AUTH] User with ID ${id} not found during deserialization.`);
-      return done(null, false);
-    }
-    // Normalize user object for frontend
-    user.role = user.tipo; // Use 'tipo' as 'role'
-    user.sector = user.setor; // Use 'setor' as 'sector'
-    console.log(`[AUTH] Deserialized user: ${user.email}, Role: ${user.role}`);
-    done(null, user);
+    done(err, user);
   });
 });
 
-// Middleware to check if user is authenticated
-const isAuthenticated = (req, res, next) => {
-  if (req.isAuthenticated()) {
+// Middleware de autenticação
+const authenticateUser = (req, res, next) => {
+  if (req.user) {
     return next();
   }
-  console.log('[AUTH] Access denied: User not authenticated.');
-  res.status(401).json({ error: 'Não autorizado. Faça login para acessar.' });
+  
+  res.status(401).json({ ok: false, error: 'Não autenticado' });
 };
 
-// Middleware to check if user is admin
-const isAdmin = (req, res, next) => {
-  if (req.isAuthenticated() && req.user && req.user.tipo === 'admin') {
-    return next();
+// Middleware de autorização admin
+const requireAdmin = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ ok: false, error: 'Não autenticado' });
   }
-  console.log(`[AUTH] Access denied: User ${req.user ? req.user.email : 'N/A'} is not admin.`);
-  res.status(403).json({ error: 'Acesso negado. Apenas administradores podem acessar esta funcionalidade.' });
-};
-
-// Middleware to check if user is admin or RH/TI
-const isAdminOrHRorTI = (req, res, next) => {
-  if (req.isAuthenticated() && req.user && (req.user.tipo === 'admin' || req.user.setor === 'RH' || req.user.setor === 'TI')) {
-    return next();
+  
+  const isAdmin = req.user.role === 'admin' || 
+                  req.user.email === 'admin@grupocropfield.com.br' ||
+                  req.user.setor === 'TI' ||
+                  req.user.setor === 'RH';
+  
+  if (!isAdmin) {
+    return res.status(403).json({ ok: false, error: 'Acesso negado' });
   }
-  console.log(`[AUTH] Access denied: User ${req.user ? req.user.email : 'N/A'} is not admin, RH, or TI.`);
-  res.status(403).json({ error: 'Acesso negado. Apenas administradores, RH ou TI podem acessar esta funcionalidade.' });
+  
+  next();
 };
 
-// Auth Routes
+// Função para adicionar pontos
+const addUserPoints = (userId, acao, pontos, detalhes = null) => {
+  return new Promise((resolve, reject) => {
+    // Inserir na tabela de pontos
+    db.run(
+      'INSERT INTO pontos (usuario_id, acao, pontos, detalhes) VALUES (?, ?, ?, ?)',
+      [userId, acao, pontos, detalhes],
+      function(err) {
+        if (err) {
+          console.error('❌ [POINTS] Erro ao adicionar pontos:', err);
+          reject(err);
+          return;
+        }
+        
+        // Atualizar total de pontos do usuário
+        db.run(
+          'UPDATE usuarios SET pontos = pontos + ? WHERE id = ?',
+          [pontos, userId],
+          (updateErr) => {
+            if (updateErr) {
+              console.error('❌ [POINTS] Erro ao atualizar total:', updateErr);
+              reject(updateErr);
+            } else {
+              console.log(`✅ [POINTS] +${pontos} pontos para usuário ${userId} (${acao})`);
+              resolve({ pontos, acao });
+            }
+          }
+        );
+      }
+    );
+  });
+};
+
+// ==================== ROTAS DE AUTENTICAÇÃO ====================
+
+// Login manual
 app.post('/auth/login', (req, res, next) => {
+  console.log('🔐 [AUTH] POST /auth/login recebido');
+  
   passport.authenticate('local', (err, user, info) => {
     if (err) {
-      console.error('[AUTH] Passport local auth error:', err.message);
-      return res.status(500).json({ error: 'Erro no servidor durante a autenticação.' });
+      console.error('❌ [AUTH] Erro no authenticate:', err);
+      return res.status(500).json({ ok: false, error: 'Erro interno do servidor' });
     }
+    
     if (!user) {
-      console.log('[AUTH] Local auth failed:', info.message);
-      return res.status(401).json({ error: info.message });
+      console.log('❌ [AUTH] Falha na autenticação:', info?.message);
+      return res.status(401).json({ ok: false, error: info?.message || 'Credenciais inválidas' });
     }
-    req.logIn(user, (err) => {
-      if (err) {
-        console.error('[AUTH] req.logIn error:', err.message);
-        return res.status(500).json({ error: 'Erro ao fazer login.' });
+    
+    req.logIn(user, (loginErr) => {
+      if (loginErr) {
+        console.error('❌ [AUTH] Erro no login:', loginErr);
+        return res.status(500).json({ ok: false, error: 'Erro ao realizar login' });
       }
-      console.log(`[AUTH] User ${user.email} successfully logged in.`);
-      // Generate JWT token (optional, if you want token-based auth alongside sessions)
-      const token = jwt.sign({ id: user.id, email: user.email, role: user.tipo }, JWT_SECRET, { expiresIn: '1h' });
-      res.json({ message: 'Login bem-sucedido!', user: { id: user.id, nome: user.nome, email: user.email, setor: user.setor, tipo: user.tipo, avatar_url: user.avatar_url }, token });
+      
+      console.log('✅ [AUTH] Login successful para:', user.email);
+      
+      // Normalizar dados do usuário
+      const userData = {
+        id: user.uuid || user.id,
+        name: user.nome,
+        email: user.email,
+        sector: user.setor,
+        setor: user.setor,
+        role: user.role,
+        avatar: user.foto
+      };
+      
+      res.json({ 
+        ok: true, 
+        user: userData,
+        message: 'Login realizado com sucesso!' 
+      });
     });
   })(req, res, next);
 });
 
-app.get('/auth/google', passport.authenticate('google', { scope: ['profile', 'email'] }));
-
-app.get('/auth/google/callback',
-  passport.authenticate('google', { failureRedirect: '/login' }),
-  (req, res) => {
-    console.log(`[AUTH] Google login successful for user: ${req.user.email}`);
-    // Successful authentication, redirect home.
-    res.redirect(process.env.FRONTEND_URL || 'http://localhost:5173');
-  }
-);
-
-app.post('/auth/logout', isAuthenticated, (req, res, next) => {
+// Logout
+app.post('/auth/logout', (req, res) => {
+  console.log('🚪 [AUTH] Logout solicitado');
+  
   req.logout((err) => {
     if (err) {
-      console.error('[AUTH] req.logout error:', err.message);
-      return next(err);
+      console.error('❌ [AUTH] Erro no logout:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao fazer logout' });
     }
-    req.session.destroy((err) => {
-      if (err) {
-        console.error('[AUTH] req.session.destroy error:', err.message);
-        return next(err);
+    
+    req.session.destroy((sessionErr) => {
+      if (sessionErr) {
+        console.error('❌ [AUTH] Erro ao destruir sessão:', sessionErr);
       }
-      res.clearCookie('connect.sid'); // Clear session cookie
-      console.log('[AUTH] User logged out and session destroyed.');
-      res.json({ message: 'Logout bem-sucedido!' });
+      
+      res.clearCookie('connect.sid');
+      res.json({ ok: true, message: 'Logout realizado com sucesso' });
     });
   });
 });
 
+// Verificar usuário logado
 app.get('/api/me', (req, res) => {
-  console.log('🔐 [ME] Checking authentication for session:', req.session?.id);
-  console.log('🔐 [ME] User in session:', req.user?.email || 'Not authenticated');
+  if (!req.user) {
+    return res.status(401).json({ ok: false, error: 'Não autenticado' });
+  }
   
-  if (req.isAuthenticated()) {
-    console.log(`[API] /api/me accessed by: ${req.user.email}`);
-    res.json({ user: req.user });
-  } else {
-    console.log('🔐 [ME] User not authenticated');
-    console.log('[API] /api/me accessed by unauthenticated user.');
-    res.status(401).json({ error: 'Não autenticado.' });
-  }
-});
-
-// Admin Routes
-app.get('/api/admin/dashboard', isAuthenticated, isAdmin, (req, res) => {
-  console.log('[ADMIN] Accessing dashboard stats.');
-  // Mock data for now, replace with actual DB queries
-  const stats = {
-    usuarios_ativos: 10,
-    posts_mural: 25,
-    reservas_salas: 15,
-    solicitacoes_ti: 5,
-    trocas_proteina: 30,
-    agendamentos_portaria: 8
+  const userData = {
+    id: req.user.uuid || req.user.id,
+    name: req.user.nome,
+    email: req.user.email,
+    sector: req.user.setor,
+    setor: req.user.setor,
+    role: req.user.role,
+    avatar: req.user.foto
   };
-  res.json({ stats });
+  
+  res.json({ ok: true, user: userData });
 });
 
-// New: Admin user management routes
-app.get('/api/admin/users', isAuthenticated, isAdmin, (req, res) => {
-  console.log('[ADMIN] Fetching all users.');
-  db.all('SELECT id, nome, email, setor, tipo AS role, avatar_url, pontos_gamificacao, created_at FROM usuarios', [], (err, rows) => {
+// ==================== ROTAS DA APLICAÇÃO ====================
+
+// Reservas de salas
+app.get('/api/reservas', authenticateUser, (req, res) => {
+  console.log('📅 [RESERVAS] GET /api/reservas');
+  
+  db.all(`
+    SELECT r.*, u.nome as responsavel 
+    FROM reservas r 
+    JOIN usuarios u ON r.usuario_id = u.id 
+    WHERE r.status = 'ativa'
+    ORDER BY r.data, r.inicio
+  `, (err, rows) => {
     if (err) {
-      console.error('[ADMIN] Error fetching users:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar usuários.' });
+      console.error('❌ [RESERVAS] Erro ao carregar:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar reservas' });
     }
-    res.json({ users: rows });
+    
+    res.json({ ok: true, reservas: rows || [] });
   });
 });
 
-app.post('/api/admin/users', isAuthenticated, isAdmin, (req, res) => {
-  const { nome, email, senha, setor, role } = req.body;
-  console.log(`[ADMIN] Creating new user: ${email} with role: ${role}`);
-
-  if (!nome || !email || !senha) {
-    return res.status(400).json({ error: 'Nome, email e senha são obrigatórios.' });
+app.post('/api/reservas', authenticateUser, (req, res) => {
+  const { sala, data, inicio, fim, assunto } = req.body;
+  
+  if (!sala || !data || !inicio || !fim || !assunto) {
+    return res.status(400).json({ ok: false, error: 'Dados incompletos' });
   }
-
-  db.get('SELECT id FROM usuarios WHERE email = ?', [email], (err, row) => {
-    if (err) {
-      console.error('[ADMIN] Error checking existing user:', err.message);
-      return res.status(500).json({ error: 'Erro ao verificar usuário existente.' });
-    }
-    if (row) {
-      console.log(`[ADMIN] User creation failed: Email ${email} already exists.`);
-      return res.status(409).json({ error: 'Este email já está cadastrado.' });
-    }
-
-    bcrypt.hash(senha, 10, (err, hashedPassword) => {
-      if (err) {
-        console.error('[ADMIN] Error hashing password for new user:', err.message);
-        return res.status(500).json({ error: 'Erro ao processar senha.' });
-      }
-
-      db.run(
-        'INSERT INTO usuarios (nome, email, senha, setor, tipo) VALUES (?, ?, ?, ?, ?)',
-        [nome, email, hashedPassword, setor || 'Geral', role || 'comum'],
-        function (err) {
-          if (err) {
-            console.error('[ADMIN] Error inserting new user:', err.message);
-            return res.status(500).json({ error: 'Erro ao criar usuário.' });
-          }
-          console.log(`[ADMIN] New user ${email} created successfully with ID: ${this.lastID}`);
-          res.status(201).json({ message: 'Usuário criado com sucesso!', userId: this.lastID });
-        }
-      );
-    });
-  });
-});
-
-app.patch('/api/admin/users/:id', isAuthenticated, isAdmin, (req, res) => {
-  const { id } = req.params;
-  const { nome, email, setor, role, ativo } = req.body;
-  console.log(`[ADMIN] Updating user ID: ${id}`);
-
-  const updates = [];
-  const params = [];
-
-  if (nome !== undefined) { updates.push('nome = ?'); params.push(nome); }
-  if (email !== undefined) { updates.push('email = ?'); params.push(email); }
-  if (setor !== undefined) { updates.push('setor = ?'); params.push(setor); }
-  if (role !== undefined) { updates.push('tipo = ?'); params.push(role); }
-  if (ativo !== undefined) { updates.push('ativo = ?'); params.push(ativo ? 1 : 0); } // SQLite uses 1/0 for boolean
-
-  if (updates.length === 0) {
-    return res.status(400).json({ error: 'Nenhum dado para atualizar.' });
-  }
-
-  params.push(id);
+  
+  const uuid = generateUUID();
+  
   db.run(
-    `UPDATE usuarios SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-    params,
-    function (err) {
+    'INSERT INTO reservas (uuid, usuario_id, sala, data, inicio, fim, assunto) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [uuid, req.user.id, sala, data, inicio, fim, assunto],
+    async function(err) {
       if (err) {
-        console.error(`[ADMIN] Error updating user ${id}:`, err.message);
-        return res.status(500).json({ error: 'Erro ao atualizar usuário.' });
+        console.error('❌ [RESERVAS] Erro ao criar:', err);
+        return res.status(500).json({ ok: false, error: 'Erro ao criar reserva' });
       }
-      if (this.changes === 0) {
-        console.log(`[ADMIN] User ${id} not found for update.`);
-        return res.status(404).json({ error: 'Usuário não encontrado.' });
+      
+      try {
+        await addUserPoints(req.user.id, 'RESERVA_CREATE', 10, `Reserva: ${sala} - ${assunto}`);
+        res.json({ ok: true, id: uuid, points: 10 });
+      } catch (pointsErr) {
+        console.error('❌ [RESERVAS] Erro ao adicionar pontos:', pointsErr);
+        res.json({ ok: true, id: uuid });
       }
-      console.log(`[ADMIN] User ${id} updated successfully.`);
-      res.json({ message: 'Usuário atualizado com sucesso!' });
     }
   );
 });
 
-app.patch('/api/admin/users/:id/password', isAuthenticated, isAdmin, (req, res) => {
-  const { id } = req.params;
-  const { senha } = req.body;
-  console.log(`[ADMIN] Resetting password for user ID: ${id}`);
-
-  if (!senha || senha.length < 6) {
-    return res.status(400).json({ error: 'A senha deve ter pelo menos 6 caracteres.' });
-  }
-
-  bcrypt.hash(senha, 10, (err, hashedPassword) => {
-    if (err) {
-      console.error('[ADMIN] Error hashing new password:', err.message);
-      return res.status(500).json({ error: 'Erro ao processar a nova senha.' });
-    }
-
-    db.run(
-      'UPDATE usuarios SET senha = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-      [hashedPassword, id],
-      function (err) {
-        if (err) {
-          console.error(`[ADMIN] Error resetting password for user ${id}:`, err.message);
-          return res.status(500).json({ error: 'Erro ao redefinir a senha.' });
-        }
-        if (this.changes === 0) {
-          console.log(`[ADMIN] User ${id} not found for password reset.`);
-          return res.status(404).json({ error: 'Usuário não encontrado.' });
-        }
-        console.log(`[ADMIN] Password reset successfully for user ${id}.`);
-        res.json({ message: 'Senha redefinida com sucesso!' });
-      }
-    );
-  });
-});
-
-// Admin Export Routes
-app.get('/api/admin/export/ranking.csv', isAuthenticated, isAdmin, (req, res) => {
-  console.log('[ADMIN] Exporting ranking as CSV.');
-  const month = req.query.month || new Date().toISOString().slice(0, 7); // YYYY-MM
-
+// Mural
+app.get('/api/mural/posts', authenticateUser, (req, res) => {
+  console.log('📢 [MURAL] GET /api/mural/posts');
+  
   db.all(`
-    SELECT u.nome, u.email, u.setor, u.pontos_gamificacao AS total_pontos
-    FROM usuarios u
-    ORDER BY u.pontos_gamificacao DESC
-  `, [], (err, rows) => {
+    SELECT 
+      p.*,
+      u.nome as author,
+      COUNT(DISTINCT l.id) as likes_count,
+      COUNT(DISTINCT c.id) as comments_count
+    FROM mural_posts p
+    JOIN usuarios u ON p.usuario_id = u.id
+    LEFT JOIN mural_likes l ON p.id = l.post_id
+    LEFT JOIN mural_comments c ON p.id = c.post_id
+    WHERE p.ativo = 1
+    GROUP BY p.id
+    ORDER BY p.pinned DESC, p.created_at DESC
+  `, (err, rows) => {
     if (err) {
-      console.error('[ADMIN] Error fetching ranking data for CSV:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar dados do ranking.' });
+      console.error('❌ [MURAL] Erro ao carregar posts:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar posts' });
     }
-
-    let csv = 'Nome,Email,Setor,Pontos\n';
-    rows.forEach(row => {
-      csv += `${row.nome},${row.email},${row.setor},${row.total_pontos}\n`;
-    });
-
-    res.header('Content-Type', 'text/csv');
-    res.attachment(`ranking-${month}.csv`);
-    res.send(csv);
-    console.log(`[ADMIN] Ranking CSV for ${month} sent.`);
+    
+    res.json({ ok: true, posts: rows || [] });
   });
 });
 
-app.get('/api/admin/export/ranking.excel', isAuthenticated, isAdmin, async (req, res) => {
-  console.log('[ADMIN] Exporting ranking as Excel.');
-  const month = req.query.month || new Date().toISOString().slice(0, 7); // YYYY-MM
-
-  try {
-    const rows = await new Promise((resolve, reject) => {
-      db.all(`
-        SELECT u.nome, u.email, u.setor, u.pontos_gamificacao AS total_pontos
-        FROM usuarios u
-        ORDER BY u.pontos_gamificacao DESC
-      `, [], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
-
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Ranking');
-
-    worksheet.columns = [
-      { header: 'Nome', key: 'nome', width: 30 },
-      { header: 'Email', key: 'email', width: 40 },
-      { header: 'Setor', key: 'setor', width: 20 },
-      { header: 'Pontos', key: 'total_pontos', width: 15 }
-    ];
-
-    worksheet.addRows(rows);
-
-    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.attachment(`ranking-${month}.xlsx`);
-    await workbook.xlsx.write(res);
-    res.end();
-    console.log(`[ADMIN] Ranking Excel for ${month} sent.`);
-  } catch (err) {
-    console.error('[ADMIN] Error exporting ranking to Excel:', err.message);
-    res.status(500).json({ error: 'Erro ao exportar ranking para Excel.' });
+app.post('/api/mural/posts', authenticateUser, (req, res) => {
+  const { titulo, conteudo, pinned = false } = req.body;
+  
+  // Verificar permissão para postar
+  const canPost = req.user.setor === 'TI' || req.user.setor === 'RH' || req.user.role === 'admin';
+  if (!canPost) {
+    return res.status(403).json({ ok: false, error: 'Sem permissão para criar posts' });
   }
-});
-
-app.get('/api/admin/export/ranking.pdf', isAuthenticated, isAdmin, async (req, res) => {
-  console.log('[ADMIN] Exporting ranking as PDF.');
-  const month = req.query.month || new Date().toISOString().slice(0, 7); // YYYY-MM
-
-  try {
-    const rows = await new Promise((resolve, reject) => {
-      db.all(`
-        SELECT u.nome, u.email, u.setor, u.pontos_gamificacao AS total_pontos
-        FROM usuarios u
-        ORDER BY u.pontos_gamificacao DESC
-      `, [], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
-
-    const doc = new PDFDocument();
-    let filename = `ranking-${month}.pdf`;
-    filename = encodeURIComponent(filename);
-    res.setHeader('Content-disposition', 'attachment; filename="' + filename + '"');
-    res.setHeader('Content-type', 'application/pdf');
-
-    doc.pipe(res);
-
-    doc.fontSize(20).text('Ranking de Usuários - ' + month, { align: 'center' });
-    doc.moveDown();
-
-    const table = {
-      headers: ['Nome', 'Email', 'Setor', 'Pontos'],
-      rows: rows.map(row => [row.nome, row.email, row.setor, row.total_pontos.toString()])
-    };
-
-    const tableTop = 150;
-    const itemHeight = 20;
-    let currentY = tableTop;
-
-    // Draw headers
-    doc.font('Helvetica-Bold').fontSize(10);
-    table.headers.forEach((header, i) => {
-      doc.text(header, 50 + i * 150, currentY, { width: 140, align: 'left' });
-    });
-    currentY += itemHeight;
-    doc.font('Helvetica').fontSize(9);
-
-    // Draw rows
-    rows.forEach(row => {
-      doc.text(row.nome, 50, currentY, { width: 140, align: 'left' });
-      doc.text(row.email, 200, currentY, { width: 140, align: 'left' });
-      doc.text(row.setor, 350, currentY, { width: 100, align: 'left' });
-      doc.text(row.total_pontos.toString(), 450, currentY, { width: 80, align: 'right' });
-      currentY += itemHeight;
-    });
-
-    doc.end();
-    console.log(`[ADMIN] Ranking PDF for ${month} sent.`);
-  } catch (err) {
-    console.error('[ADMIN] Error exporting ranking to PDF:', err.message);
-    res.status(500).json({ error: 'Erro ao exportar ranking para PDF.' });
-  }
-});
-
-app.get('/api/admin/export/activities.csv', isAuthenticated, isAdmin, (req, res) => {
-  console.log('[ADMIN] Exporting activities as CSV.');
-  const month = req.query.month || new Date().toISOString().slice(0, 7); // YYYY-MM
-
-  db.all(`
-    SELECT g.acao, g.modulo, g.pontos, g.detalhes, g.created_at, u.nome AS usuario_nome, u.email AS usuario_email
-    FROM gamificacao g
-    JOIN usuarios u ON g.usuario_id = u.id
-    WHERE strftime('%Y-%m', g.created_at) = ?
-    ORDER BY g.created_at DESC
-  `, [month], (err, rows) => {
-    if (err) {
-      console.error('[ADMIN] Error fetching activities data for CSV:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar dados de atividades.' });
-    }
-
-    let csv = 'Ação,Módulo,Pontos,Detalhes,Data,Usuário Nome,Usuário Email\n';
-    rows.forEach(row => {
-      const details = row.detalhes ? JSON.stringify(row.detalhes).replace(/"/g, '""') : '';
-      csv += `${row.acao},${row.modulo},${row.pontos},"${details}",${row.created_at},${row.usuario_nome},${row.usuario_email}\n`;
-    });
-
-    res.header('Content-Type', 'text/csv');
-    res.attachment(`atividades-${month}.csv`);
-    res.send(csv);
-    console.log(`[ADMIN] Activities CSV for ${month} sent.`);
-  });
-});
-
-app.get('/api/admin/export/activities.excel', isAuthenticated, isAdmin, async (req, res) => {
-  console.log('[ADMIN] Exporting activities as Excel.');
-  const month = req.query.month || new Date().toISOString().slice(0, 7); // YYYY-MM
-
-  try {
-    const rows = await new Promise((resolve, reject) => {
-      db.all(`
-        SELECT g.acao, g.modulo, g.pontos, g.detalhes, g.created_at, u.nome AS usuario_nome, u.email AS usuario_email
-        FROM gamificacao g
-        JOIN usuarios u ON g.usuario_id = u.id
-        WHERE strftime('%Y-%m', g.created_at) = ?
-        ORDER BY g.created_at DESC
-      `, [month], (err, rows) => {
-        if (err) reject(err);
-        else resolve(rows);
-      });
-    });
-
-    const workbook = new ExcelJS.Workbook();
-    const worksheet = workbook.addWorksheet('Atividades');
-
-    worksheet.columns = [
-      { header: 'Ação', key: 'acao', width: 20 },
-      { header: 'Módulo', key: 'modulo', width: 20 },
-      { header: 'Pontos', key: 'pontos', width: 10 },
-      { header: 'Detalhes', key: 'detalhes', width: 50 },
-      { header: 'Data', key: 'created_at', width: 25 },
-      { header: 'Usuário Nome', key: 'usuario_nome', width: 30 },
-      { header: 'Usuário Email', key: 'usuario_email', width: 40 }
-    ];
-
-    worksheet.addRows(rows.map(row => ({
-      ...row,
-      detalhes: row.detalhes ? JSON.stringify(row.detalhes) : ''
-    })));
-
-    res.header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.attachment(`atividades-${month}.xlsx`);
-    await workbook.xlsx.write(res);
-    res.end();
-    console.log(`[ADMIN] Activities Excel for ${month} sent.`);
-  } catch (err) {
-    console.error('[ADMIN] Error exporting activities to Excel:', err.message);
-    res.status(500).json({ error: 'Erro ao exportar atividades para Excel.' });
-  }
-});
-
-app.get('/api/admin/export/backup.json', isAuthenticated, isAdmin, async (req, res) => {
-  console.log('[ADMIN] Exporting full database backup as JSON.');
-  try {
-    const tables = ['usuarios', 'gamificacao', 'trocas_proteina', 'reservas_salas', 'portaria', 'equipamentos_ti', 'mural', 'mural_reacoes'];
-    const backupData = {};
-
-    for (const table of tables) {
-      backupData[table] = await new Promise((resolve, reject) => {
-        db.all(`SELECT * FROM ${table}`, [], (err, rows) => {
-          if (err) reject(err);
-          else resolve(rows);
-        });
-      });
-    }
-
-    res.header('Content-Type', 'application/json');
-    res.attachment(`backup-${new Date().toISOString().slice(0, 10)}.json`);
-    res.json({
-      metadata: {
-        timestamp: new Date().toISOString(),
-        format: 'json',
-        generatedBy: 'Intranet Backend',
-        tables: tables
-      },
-      data: backupData
-    });
-    console.log('[ADMIN] Full database backup JSON sent.');
-  } catch (err) {
-    console.error('[ADMIN] Error exporting database backup to JSON:', err.message);
-    res.status(500).json({ error: 'Erro ao gerar backup JSON.' });
-  }
-});
-
-app.get('/api/admin/export/backup.sql', isAuthenticated, isAdmin, (req, res) => {
-  console.log('[ADMIN] Exporting full database backup as SQL (placeholder).');
-  // This would typically involve dumping the SQLite database schema and data
-  // For a simple placeholder, we just return a message
-  res.json({ message: 'Funcionalidade de backup SQL em desenvolvimento.' });
-});
-
-// API Routes (example)
-app.get('/api/reservas', isAuthenticated, (req, res) => {
-  console.log('[API] Fetching reservations.');
-  db.all('SELECT rs.*, u.nome AS responsavel FROM reservas_salas rs JOIN usuarios u ON rs.usuario_id = u.id ORDER BY rs.data_reserva DESC, rs.hora_inicio DESC', [], (err, rows) => {
-    if (err) {
-      console.error('[API] Error fetching reservations:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar reservas.' });
-    }
-    res.json({ reservas: rows });
-  });
-});
-
-app.post('/api/reservas', isAuthenticated, async (req, res) => {
-  const { sala, data, inicio, fim, assunto } = req.body;
-  const usuario_id = req.user.id; // From deserialized user
-  console.log(`[API] Creating reservation for user ${req.user.email} in room ${sala} on ${data}.`);
-
-  if (!sala || !data || !inicio || !fim || !assunto) {
-    return res.status(400).json({ error: 'Todos os campos são obrigatórios.' });
-  }
-
-  try {
-    // Check for overlapping reservations
-    const overlap = await new Promise((resolve, reject) => {
-      db.get(`
-        SELECT COUNT(*) AS count FROM reservas_salas
-        WHERE sala = ? AND data_reserva = ?
-        AND (
-          (? < hora_fim AND ? > hora_inicio) OR
-          (? = hora_inicio AND ? = hora_fim)
-        )
-      `, [sala, data, inicio, fim, inicio, fim], (err, row) => {
-        if (err) reject(err);
-        else resolve(row.count);
-      });
-    });
-
-    if (overlap > 0) {
-      console.log(`[API] Overlapping reservation detected for room ${sala} on ${data}.`);
-      return res.status(409).json({ error: 'Já existe uma reserva para esta sala neste horário.' });
-    }
-
-    const result = await new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO reservas_salas (usuario_id, sala, data_reserva, hora_inicio, hora_fim, motivo) VALUES (?, ?, ?, ?, ?, ?)',
-        [usuario_id, sala, data, inicio, fim, assunto],
-        function (err) {
-          if (err) reject(err);
-          else resolve(this);
-        }
-      );
-    });
-
-    // Add gamification points
-    const points = 10;
-    db.run(
-      'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-      [usuario_id, 'RESERVA_CREATE', points, 'Reservas', JSON.stringify({ sala, data, inicio, fim, assunto })],
-      (err) => {
-        if (err) console.error('Erro ao adicionar pontos de gamificação:', err.message);
-      }
-    );
-
-    console.log(`[API] Reservation created successfully with ID: ${result.lastID}`);
-    res.status(201).json({ message: 'Reserva criada com sucesso!', id: result.lastID, points });
-  } catch (err) {
-    console.error('[API] Error creating reservation:', err.message);
-    res.status(500).json({ error: 'Erro ao criar reserva.' });
-  }
-});
-
-app.get('/api/portaria/agendamentos', isAuthenticated, (req, res) => {
-  console.log('[API] Fetching portaria appointments.');
-  db.all('SELECT p.*, u.nome AS responsavel_nome FROM portaria p JOIN usuarios u ON p.responsavel_id = u.id ORDER BY p.data_visita DESC, p.hora_entrada DESC', [], (err, rows) => {
-    if (err) {
-      console.error('[API] Error fetching portaria appointments:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar agendamentos da portaria.' });
-    }
-    res.json({ agendamentos: rows });
-  });
-});
-
-app.post('/api/portaria/agendamentos', isAuthenticated, async (req, res) => {
-  const { data, hora, visitante, documento, observacao } = req.body;
-  const responsavel_id = req.user.id; // From deserialized user
-  const setor_destino = req.user.setor || 'Geral'; // Use user's sector as default destination
-  const motivo = `Visita de ${visitante}`; // Default motive
-
-  console.log(`[API] Creating portaria appointment for ${visitante} on ${data} at ${hora}.`);
-
-  if (!data || !hora || !visitante) {
-    return res.status(400).json({ error: 'Data, hora e nome do visitante são obrigatórios.' });
-  }
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO portaria (nome_visitante, documento, data_visita, hora_entrada, responsavel_id, setor_destino, motivo, observacoes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [visitante, documento, data, hora, responsavel_id, setor_destino, motivo, observacao],
-        function (err) {
-          if (err) reject(err);
-          else resolve(this);
-        }
-      );
-    });
-
-    // Add gamification points
-    const points = 10;
-    db.run(
-      'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-      [responsavel_id, 'PORTARIA_CREATE', points, 'Portaria', JSON.stringify({ visitante, data, hora })],
-      (err) => {
-        if (err) console.error('Erro ao adicionar pontos de gamificação:', err.message);
-      }
-    );
-
-    console.log(`[API] Portaria appointment created successfully with ID: ${result.lastID}`);
-    res.status(201).json({ message: 'Agendamento criado com sucesso!', id: result.lastID, points });
-  } catch (err) {
-    console.error('[API] Error creating portaria appointment:', err.message);
-    res.status(500).json({ error: 'Erro ao criar agendamento da portaria.' });
-  }
-});
-
-app.get('/api/ti/solicitacoes', isAuthenticated, isAdminOrHRorTI, (req, res) => {
-  console.log('[API] Fetching all TI requests (admin/TI/RH view).');
-  db.all(`
-    SELECT e.*, u.nome AS usuario_nome, u.email AS usuario_email
-    FROM equipamentos_ti e
-    JOIN usuarios u ON e.usuario_id = u.id
-    ORDER BY e.created_at DESC
-  `, [], (err, rows) => {
-    if (err) {
-      console.error('[API] Error fetching TI requests:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar solicitações de TI.' });
-    }
-    res.json({ solicitacoes: rows });
-  });
-});
-
-app.get('/api/ti/minhas', isAuthenticated, (req, res) => {
-  const userEmail = req.query.email;
-  if (!userEmail) {
-    return res.status(400).json({ error: 'Email do usuário é obrigatório.' });
-  }
-  console.log(`[API] Fetching TI requests for user: ${userEmail}.`);
-
-  db.all(`
-    SELECT e.*, u.nome AS usuario_nome, u.email AS usuario_email
-    FROM equipamentos_ti e
-    JOIN usuarios u ON e.usuario_id = u.id
-    WHERE u.email = ?
-    ORDER BY e.created_at DESC
-  `, [userEmail], (err, rows) => {
-    if (err) {
-      console.error('[API] Error fetching user TI requests:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar suas solicitações de TI.' });
-    }
-    res.json({ solicitacoes: rows });
-  });
-});
-
-app.post('/api/ti/solicitacoes', isAuthenticated, async (req, res) => {
-  const { titulo, descricao, prioridade, email, nome } = req.body;
-  const usuario_id = req.user.id; // From deserialized user
-  console.log(`[API] Creating TI request for user ${req.user.email}: ${titulo}.`);
-
-  if (!titulo || !descricao || !prioridade) {
-    return res.status(400).json({ error: 'Título, descrição e prioridade são obrigatórios.' });
-  }
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO equipamentos_ti (usuario_id, tipo_equipamento, descricao, justificativa, prioridade) VALUES (?, ?, ?, ?, ?)',
-        [usuario_id, titulo, descricao, descricao, prioridade], // Using descricao for justificativa as well
-        function (err) {
-          if (err) reject(err);
-          else resolve(this);
-        }
-      );
-    });
-
-    // Add gamification points
-    const points = 5;
-    db.run(
-      'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-      [usuario_id, 'EQUIPMENT_REQUEST', points, 'Equipamentos TI', JSON.stringify({ titulo, prioridade })],
-      (err) => {
-        if (err) console.error('Erro ao adicionar pontos de gamificação:', err.message);
-      }
-    );
-
-    console.log(`[API] TI request created successfully with ID: ${result.lastID}`);
-    res.status(201).json({ message: 'Solicitação de TI criada com sucesso!', id: result.lastID, points });
-  } catch (err) {
-    console.error('[API] Error creating TI request:', err.message);
-    res.status(500).json({ error: 'Erro ao criar solicitação de TI.' });
-  }
-});
-
-app.get('/api/mural/posts', isAuthenticated, (req, res) => {
-  console.log('[API] Fetching mural posts.');
-  db.all(`
-    SELECT m.id, m.titulo, m.conteudo, m.created_at, m.ativo, m.anexo_url, m.tipo, m.setor_origem,
-           u.nome AS author,
-           (SELECT COUNT(*) FROM mural_reacoes mr WHERE mr.mural_id = m.id AND mr.tipo_reacao = 'like') AS likes_count,
-           (SELECT COUNT(*) FROM mural_reacoes mr WHERE mr.mural_id = m.id AND mr.tipo_reacao = 'comment') AS comments_count
-    FROM mural m
-    JOIN usuarios u ON m.usuario_id = u.id
-    WHERE m.ativo = TRUE
-    ORDER BY m.created_at DESC
-  `, [], (err, rows) => {
-    if (err) {
-      console.error('[API] Error fetching mural posts:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar posts do mural.' });
-    }
-    res.json({ posts: rows });
-  });
-});
-
-app.post('/api/mural/posts', isAuthenticated, isAdminOrHRorTI, async (req, res) => {
-  const { titulo, conteudo, pinned } = req.body;
-  const usuario_id = req.user.id;
-  const setor_origem = req.user.setor || 'Geral';
-  const tipo = pinned ? 'aviso' : 'informativo'; // Simple mapping for now
-
-  console.log(`[API] Creating mural post by ${req.user.email}: ${titulo}.`);
-
+  
   if (!titulo || !conteudo) {
-    return res.status(400).json({ error: 'Título e conteúdo são obrigatórios.' });
+    return res.status(400).json({ ok: false, error: 'Título e conteúdo são obrigatórios' });
   }
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      db.run(
-        'INSERT INTO mural (usuario_id, titulo, conteudo, tipo, setor_origem, ativo) VALUES (?, ?, ?, ?, ?, ?)',
-        [usuario_id, titulo, conteudo, tipo, setor_origem, true],
-        function (err) {
-          if (err) reject(err);
-          else resolve(this);
-        }
-      );
-    });
-
-    // Add gamification points
-    const points = 15;
-    db.run(
-      'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-      [usuario_id, 'POST_CREATION', points, 'Mural', JSON.stringify({ titulo, tipo })],
-      (err) => {
-        if (err) console.error('Erro ao adicionar pontos de gamificação:', err.message);
+  
+  const uuid = generateUUID();
+  
+  db.run(
+    'INSERT INTO mural_posts (uuid, usuario_id, titulo, conteudo, pinned) VALUES (?, ?, ?, ?, ?)',
+    [uuid, req.user.id, titulo, conteudo, pinned ? 1 : 0],
+    async function(err) {
+      if (err) {
+        console.error('❌ [MURAL] Erro ao criar post:', err);
+        return res.status(500).json({ ok: false, error: 'Erro ao criar post' });
       }
-    );
-
-    console.log(`[API] Mural post created successfully with ID: ${result.lastID}`);
-    res.status(201).json({ message: 'Publicação criada com sucesso!', id: result.lastID, points });
-  } catch (err) {
-    console.error('[API] Error creating mural post:', err.message);
-    res.status(500).json({ error: 'Erro ao criar publicação.' });
-  }
-});
-
-app.post('/api/mural/:postId/like', isAuthenticated, async (req, res) => {
-  const { postId } = req.params;
-  const usuario_id = req.user.id;
-  const tipo_reacao = 'like';
-
-  console.log(`[API] User ${req.user.email} reacting to post ${postId} with ${tipo_reacao}.`);
-
-  try {
-    const existingReaction = await new Promise((resolve, reject) => {
-      db.get('SELECT id FROM mural_reacoes WHERE mural_id = ? AND usuario_id = ? AND tipo_reacao = ?',
-        [postId, usuario_id, tipo_reacao], (err, row) => {
-          if (err) reject(err);
-          else resolve(row);
-        });
-    });
-
-    let action = '';
-    let points = 0;
-
-    if (existingReaction) {
-      // Unlike
-      await new Promise((resolve, reject) => {
-        db.run('DELETE FROM mural_reacoes WHERE id = ?', [existingReaction.id], function (err) {
-          if (err) reject(err);
-          else resolve(this);
-        });
-      });
-      action = 'unliked';
-      points = -2; // Deduct points for unliking
-      console.log(`[API] User ${req.user.email} unliked post ${postId}.`);
-    } else {
-      // Like
-      await new Promise((resolve, reject) => {
-        db.run('INSERT INTO mural_reacoes (mural_id, usuario_id, tipo_reacao) VALUES (?, ?, ?)',
-          [postId, usuario_id, tipo_reacao], function (err) {
-            if (err) reject(err);
-            else resolve(this);
-          });
-      });
-      action = 'liked';
-      points = 2; // Add points for liking
-      console.log(`[API] User ${req.user.email} liked post ${postId}.`);
+      
+      try {
+        await addUserPoints(req.user.id, 'MURAL_POST', 15, `Post: ${titulo}`);
+        res.json({ ok: true, id: uuid, points: 15 });
+      } catch (pointsErr) {
+        console.error('❌ [MURAL] Erro ao adicionar pontos:', pointsErr);
+        res.json({ ok: true, id: uuid });
+      }
     }
-
-    // Update user's total gamification points
-    db.run('UPDATE usuarios SET pontos_gamificacao = pontos_gamificacao + ? WHERE id = ?',
-      [points, usuario_id], (err) => {
-        if (err) console.error('Erro ao atualizar pontos de gamificação:', err.message);
-      });
-
-    // Record gamification activity
-    db.run(
-      'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-      [usuario_id, 'MURAL_LIKE', points, 'Mural', JSON.stringify({ postId, action })],
-      (err) => {
-        if (err) console.error('Erro ao adicionar atividade de gamificação:', err.message);
-      }
-    );
-
-    res.json({ message: `Post ${action}!`, action, points });
-  } catch (err) {
-    console.error('[API] Error processing like reaction:', err.message);
-    res.status(500).json({ error: 'Erro ao processar reação.' });
-  }
+  );
 });
 
-app.post('/api/mural/:postId/comments', isAuthenticated, async (req, res) => {
+// Likes no mural
+app.post('/api/mural/:postId/like', authenticateUser, (req, res) => {
+  const { postId } = req.params;
+  
+  // Verificar se já curtiu
+  db.get(
+    'SELECT id FROM mural_likes WHERE post_id = (SELECT id FROM mural_posts WHERE uuid = ?) AND usuario_id = ?',
+    [postId, req.user.id],
+    (err, existingLike) => {
+      if (err) {
+        console.error('❌ [MURAL] Erro ao verificar like:', err);
+        return res.status(500).json({ ok: false, error: 'Erro interno' });
+      }
+      
+      if (existingLike) {
+        // Remover like
+        db.run(
+          'DELETE FROM mural_likes WHERE post_id = (SELECT id FROM mural_posts WHERE uuid = ?) AND usuario_id = ?',
+          [postId, req.user.id],
+          (deleteErr) => {
+            if (deleteErr) {
+              console.error('❌ [MURAL] Erro ao remover like:', deleteErr);
+              return res.status(500).json({ ok: false, error: 'Erro ao remover like' });
+            }
+            
+            res.json({ ok: true, action: 'unliked' });
+          }
+        );
+      } else {
+        // Adicionar like
+        db.get('SELECT id FROM mural_posts WHERE uuid = ?', [postId], (err, post) => {
+          if (err || !post) {
+            return res.status(404).json({ ok: false, error: 'Post não encontrado' });
+          }
+          
+          db.run(
+            'INSERT INTO mural_likes (post_id, usuario_id) VALUES (?, ?)',
+            [post.id, req.user.id],
+            async function(insertErr) {
+              if (insertErr) {
+                console.error('❌ [MURAL] Erro ao adicionar like:', insertErr);
+                return res.status(500).json({ ok: false, error: 'Erro ao adicionar like' });
+              }
+              
+              try {
+                await addUserPoints(req.user.id, 'MURAL_LIKE', 2, `Like no post ${postId}`);
+                res.json({ ok: true, action: 'liked', points: 2 });
+              } catch (pointsErr) {
+                res.json({ ok: true, action: 'liked' });
+              }
+            }
+          );
+        });
+      }
+    }
+  );
+});
+
+// Comentários no mural
+app.post('/api/mural/:postId/comments', authenticateUser, (req, res) => {
   const { postId } = req.params;
   const { texto } = req.body;
-  const usuario_id = req.user.id;
-  const tipo_reacao = 'comment'; // Using 'comment' as a reaction type for simplicity
-
-  console.log(`[API] User ${req.user.email} commenting on post ${postId}.`);
-
-  if (!texto) {
-    return res.status(400).json({ error: 'O comentário não pode ser vazio.' });
+  
+  if (!texto || !texto.trim()) {
+    return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
   }
-
-  try {
-    const result = await new Promise((resolve, reject) => {
-      db.run('INSERT INTO mural_reacoes (mural_id, usuario_id, tipo_reacao, conteudo) VALUES (?, ?, ?, ?)',
-        [postId, usuario_id, tipo_reacao, texto], // Assuming 'conteudo' column exists for comment text
-        function (err) {
-          if (err) reject(err);
-          else resolve(this);
-        });
-    });
-
-    // Add gamification points
-    const points = 3;
-    db.run('UPDATE usuarios SET pontos_gamificacao = pontos_gamificacao + ? WHERE id = ?',
-      [points, usuario_id], (err) => {
-        if (err) console.error('Erro ao atualizar pontos de gamificação:', err.message);
-      });
-
-    // Record gamification activity
+  
+  // Buscar ID do post
+  db.get('SELECT id FROM mural_posts WHERE uuid = ?', [postId], (err, post) => {
+    if (err || !post) {
+      return res.status(404).json({ ok: false, error: 'Post não encontrado' });
+    }
+    
     db.run(
-      'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-      [usuario_id, 'MURAL_COMMENT', points, 'Mural', JSON.stringify({ postId, texto })],
-      (err) => {
-        if (err) console.error('Erro ao adicionar atividade de gamificação:', err.message);
+      'INSERT INTO mural_comments (post_id, usuario_id, texto) VALUES (?, ?, ?)',
+      [post.id, req.user.id, texto.trim()],
+      async function(insertErr) {
+        if (insertErr) {
+          console.error('❌ [MURAL] Erro ao criar comentário:', insertErr);
+          return res.status(500).json({ ok: false, error: 'Erro ao criar comentário' });
+        }
+        
+        try {
+          await addUserPoints(req.user.id, 'MURAL_COMMENT', 3, `Comentário no post ${postId}`);
+          res.json({ ok: true, id: this.lastID, points: 3 });
+        } catch (pointsErr) {
+          res.json({ ok: true, id: this.lastID });
+        }
       }
     );
-
-    res.status(201).json({ message: 'Comentário adicionado!', id: result.lastID, points });
-  } catch (err) {
-    console.error('[API] Error adding comment:', err.message);
-    res.status(500).json({ error: 'Erro ao adicionar comentário.' });
-  }
+  });
 });
 
-app.get('/api/trocas-proteina', isAuthenticated, (req, res) => {
+// Trocas de proteína
+app.get('/api/trocas-proteina', authenticateUser, (req, res) => {
   const { from, to } = req.query;
-  const usuario_id = req.user.id;
-
-  console.log(`[API] Fetching protein exchanges for user ${req.user.email} from ${from} to ${to}.`);
-
-  let query = 'SELECT * FROM trocas_proteina WHERE usuario_id = ?';
-  const params = [usuario_id];
-
+  
+  let query = `
+    SELECT t.*, u.nome 
+    FROM trocas_proteina t 
+    JOIN usuarios u ON t.usuario_id = u.id 
+    WHERE t.usuario_id = ?
+  `;
+  const params = [req.user.id];
+  
   if (from && to) {
-    query += ' AND data_troca BETWEEN ? AND ?';
+    query += ' AND t.data BETWEEN ? AND ?';
     params.push(from, to);
   }
-
+  
+  query += ' ORDER BY t.data DESC';
+  
   db.all(query, params, (err, rows) => {
     if (err) {
-      console.error('[API] Error fetching protein exchanges:', err.message);
-      return res.status(500).json({ error: 'Erro ao buscar trocas de proteína.' });
+      console.error('❌ [TROCAS] Erro ao carregar:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar trocas' });
     }
-    res.json({ trocas: rows });
+    
+    res.json({ ok: true, trocas: rows || [] });
   });
 });
 
-app.post('/api/trocas-proteina/bulk', isAuthenticated, async (req, res) => {
+app.post('/api/trocas-proteina/bulk', authenticateUser, (req, res) => {
   const { trocas } = req.body;
-  const usuario_id = req.user.id;
-  console.log(`[API] Bulk saving ${trocas.length} protein exchanges for user ${req.user.email}.`);
-
-  if (!Array.isArray(trocas)) {
-    return res.status(400).json({ error: 'Formato de dados inválido. Esperado um array de trocas.' });
+  
+  if (!Array.isArray(trocas) || trocas.length === 0) {
+    return res.status(400).json({ ok: false, error: 'Dados inválidos' });
   }
-
-  let insertedCount = 0;
+  
+  let inseridas = 0;
   let totalPoints = 0;
-
-  try {
-    for (const troca of trocas) {
-      const { data, proteina_original, proteina_nova } = troca;
-
-      if (!data || !proteina_original || !proteina_nova) {
-        console.warn('[API] Skipping invalid exchange data:', troca);
-        continue;
-      }
-
-      // Check if an exchange for this date already exists for this user
-      const existingExchange = await new Promise((resolve, reject) => {
-        db.get('SELECT id FROM trocas_proteina WHERE usuario_id = ? AND data_troca = ?',
-          [usuario_id, data], (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-          });
-      });
-
-      if (existingExchange) {
-        // Update existing exchange
-        await new Promise((resolve, reject) => {
-          db.run(
-            'UPDATE trocas_proteina SET proteina_original = ?, proteina_nova = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?',
-            [proteina_original, proteina_nova, existingExchange.id],
-            function (err) {
-              if (err) reject(err);
-              else resolve(this);
-            }
-          );
-        });
-        console.log(`[API] Updated existing protein exchange for ${data}.`);
-      } else {
-        // Insert new exchange
-        await new Promise((resolve, reject) => {
-          db.run(
-            'INSERT INTO trocas_proteina (usuario_id, data_troca, proteina_original, proteina_nova) VALUES (?, ?, ?, ?)',
-            [usuario_id, data, proteina_original, proteina_nova],
-            function (err) {
-              if (err) reject(err);
-              else resolve(this);
-            }
-          );
-        });
-        insertedCount++;
-        totalPoints += 5; // Points for each new exchange
-        console.log(`[API] Inserted new protein exchange for ${data}.`);
-      }
+  const promises = [];
+  
+  for (const troca of trocas) {
+    const { data, proteina_original, proteina_nova } = troca;
+    
+    if (!data || !proteina_original || !proteina_nova) {
+      continue;
     }
-
-    // Update user's total gamification points
-    if (totalPoints > 0) {
-      db.run('UPDATE usuarios SET pontos_gamificacao = pontos_gamificacao + ? WHERE id = ?',
-        [totalPoints, usuario_id], (err) => {
-          if (err) console.error('Erro ao atualizar pontos de gamificação:', err.message);
-        });
-      // Record gamification activity
+    
+    const uuid = generateUUID();
+    
+    const promise = new Promise((resolve, reject) => {
       db.run(
-        'INSERT INTO gamificacao (usuario_id, acao, pontos, modulo, detalhes) VALUES (?, ?, ?, ?, ?)',
-        [usuario_id, 'TROCA_PROTEINA', totalPoints, 'Cardapio', JSON.stringify({ count: insertedCount })],
-        (err) => {
-          if (err) console.error('Erro ao adicionar atividade de gamificação:', err.message);
+        'INSERT OR REPLACE INTO trocas_proteina (uuid, usuario_id, data, proteina_original, proteina_nova) VALUES (?, ?, ?, ?, ?)',
+        [uuid, req.user.id, data, proteina_original, proteina_nova],
+        async function(err) {
+          if (err) {
+            console.error('❌ [TROCAS] Erro ao inserir:', err);
+            reject(err);
+            return;
+          }
+          
+          inseridas++;
+          
+          try {
+            await addUserPoints(req.user.id, 'TROCA_PROTEINA', 5, `Troca ${data}: ${proteina_original} → ${proteina_nova}`);
+            totalPoints += 5;
+          } catch (pointsErr) {
+            console.error('❌ [TROCAS] Erro ao adicionar pontos:', pointsErr);
+          }
+          
+          resolve();
         }
       );
-    }
-
-    res.status(200).json({ message: 'Trocas salvas com sucesso!', inseridas: insertedCount, totalPoints });
-  } catch (err) {
-    console.error('[API] Error in bulk protein exchange:', err.message);
-    res.status(500).json({ error: 'Erro ao salvar trocas de proteína.' });
+    });
+    
+    promises.push(promise);
   }
-});
-
-// Admin config route (example, can be expanded)
-app.get('/api/admin/config', isAuthenticated, isAdmin, (req, res) => {
-  console.log('[ADMIN] Accessing system config.');
-  res.json({
-    appName: 'Corporate Intranet',
-    version: '1.0.0',
-    environment: process.env.NODE_ENV,
-    features: {
-      gamification: true,
-      roomBooking: true,
-      mealExchange: true,
-      itRequests: true,
-      mural: true,
-      directory: true,
-    },
-    limits: {
-      maxUploadSize: '10MB',
-      sessionTimeout: '24h',
-    },
-    databaseStatus: 'connected',
+  
+  Promise.allSettled(promises).then(() => {
+    res.json({ ok: true, inseridas, totalPoints });
   });
 });
 
-
-// Start the server
-app.listen(PORT, () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-  console.log(`Acesse o frontend em: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+// Solicitações de TI
+app.get('/api/ti/solicitacoes', authenticateUser, requireAdmin, (req, res) => {
+  console.log('💻 [TI] GET /api/ti/solicitacoes (admin)');
+  
+  db.all(`
+    SELECT s.*, u.nome, u.email 
+    FROM ti_solicitacoes s 
+    JOIN usuarios u ON s.usuario_id = u.id 
+    ORDER BY s.created_at DESC
+  `, (err, rows) => {
+    if (err) {
+      console.error('❌ [TI] Erro ao carregar solicitações:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar solicitações' });
+    }
+    
+    res.json({ ok: true, solicitacoes: rows || [] });
+  });
 });
+
+app.get('/api/ti/minhas', authenticateUser, (req, res) => {
+  const { email } = req.query;
+  const userEmail = email || req.user.email;
+  
+  console.log('💻 [TI] GET /api/ti/minhas para:', userEmail);
+  
+  db.all(`
+    SELECT s.*, u.nome, u.email 
+    FROM ti_solicitacoes s 
+    JOIN usuarios u ON s.usuario_id = u.id 
+    WHERE u.email = ?
+    ORDER BY s.created_at DESC
+  `, [userEmail], (err, rows) => {
+    if (err) {
+      console.error('❌ [TI] Erro ao carregar minhas solicitações:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar solicitações' });
+    }
+    
+    res.json({ ok: true, solicitacoes: rows || [] });
+  });
+});
+
+app.post('/api/ti/solicitacoes', authenticateUser, (req, res) => {
+  const { titulo, descricao, prioridade = 'medium', email, nome } = req.body;
+  
+  if (!titulo || !descricao) {
+    return res.status(400).json({ ok: false, error: 'Título e descrição são obrigatórios' });
+  }
+  
+  const uuid = generateUUID();
+  
+  db.run(
+    'INSERT INTO ti_solicitacoes (uuid, usuario_id, titulo, descricao, prioridade) VALUES (?, ?, ?, ?, ?)',
+    [uuid, req.user.id, titulo, descricao, prioridade],
+    async function(err) {
+      if (err) {
+        console.error('❌ [TI] Erro ao criar solicitação:', err);
+        return res.status(500).json({ ok: false, error: 'Erro ao criar solicitação' });
+      }
+      
+      try {
+        await addUserPoints(req.user.id, 'TI_SOLICITACAO', 5, `Solicitação TI: ${titulo}`);
+        res.json({ ok: true, id: uuid, points: 5 });
+      } catch (pointsErr) {
+        res.json({ ok: true, id: uuid });
+      }
+    }
+  );
+});
+
+// Agendamentos da portaria
+app.get('/api/portaria/agendamentos', authenticateUser, (req, res) => {
+  console.log('🚪 [PORTARIA] GET /api/portaria/agendamentos');
+  
+  db.all(`
+    SELECT p.*, u.nome as responsavel 
+    FROM portaria_agendamentos p 
+    JOIN usuarios u ON p.usuario_id = u.id 
+    ORDER BY p.data DESC, p.hora DESC 
+    LIMIT 20
+  `, (err, rows) => {
+    if (err) {
+      console.error('❌ [PORTARIA] Erro ao carregar agendamentos:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar agendamentos' });
+    }
+    
+    res.json({ ok: true, agendamentos: rows || [] });
+  });
+});
+
+app.post('/api/portaria/agendamentos', authenticateUser, (req, res) => {
+  const { data, hora, visitante, documento, observacao } = req.body;
+  
+  if (!data || !hora || !visitante) {
+    return res.status(400).json({ ok: false, error: 'Data, hora e nome do visitante são obrigatórios' });
+  }
+  
+  const uuid = generateUUID();
+  
+  db.run(
+    'INSERT INTO portaria_agendamentos (uuid, usuario_id, visitante, documento, data, hora, observacao) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [uuid, req.user.id, visitante, documento || '', data, hora, observacao || ''],
+    async function(err) {
+      if (err) {
+        console.error('❌ [PORTARIA] Erro ao criar agendamento:', err);
+        return res.status(500).json({ ok: false, error: 'Erro ao criar agendamento' });
+      }
+      
+      try {
+        await addUserPoints(req.user.id, 'PORTARIA_CREATE', 8, `Agendamento: ${visitante} - ${data}`);
+        res.json({ ok: true, id: uuid, points: 8 });
+      } catch (pointsErr) {
+        res.json({ ok: true, id: uuid });
+      }
+    }
+  );
+});
+
+// Dashboard administrativo
+app.get('/api/admin/dashboard', authenticateUser, requireAdmin, (req, res) => {
+  console.log('📊 [ADMIN] GET /api/admin/dashboard');
+  
+  // Consultar estatísticas do sistema
+  const queries = {
+    usuarios_ativos: 'SELECT COUNT(*) as count FROM usuarios WHERE ativo = 1',
+    posts_mural: 'SELECT COUNT(*) as count FROM mural_posts WHERE ativo = 1',
+    reservas_salas: 'SELECT COUNT(*) as count FROM reservas WHERE status = "ativa"',
+    solicitacoes_ti: 'SELECT COUNT(*) as count FROM ti_solicitacoes',
+    trocas_proteina: 'SELECT COUNT(*) as count FROM trocas_proteina',
+    agendamentos_portaria: 'SELECT COUNT(*) as count FROM portaria_agendamentos'
+  };
+  
+  const stats = {};
+  const promises = Object.entries(queries).map(([key, query]) => {
+    return new Promise((resolve) => {
+      db.get(query, (err, row) => {
+        stats[key] = err ? 0 : (row?.count || 0);
+        resolve();
+      });
+    });
+  });
+  
+  Promise.all(promises).then(() => {
+    // Buscar ranking de usuários
+    db.all(`
+      SELECT 
+        u.nome,
+        u.email,
+        u.setor,
+        u.foto,
+        COALESCE(SUM(p.pontos), 0) as total_pontos
+      FROM usuarios u
+      LEFT JOIN pontos p ON u.id = p.usuario_id
+      WHERE u.ativo = 1
+      GROUP BY u.id
+      ORDER BY total_pontos DESC
+      LIMIT 10
+    `, (err, ranking) => {
+      if (err) {
+        console.error('❌ [ADMIN] Erro ao carregar ranking:', err);
+        ranking = [];
+      }
+      
+      // Pontos do usuário atual
+      db.get(`
+        SELECT 
+          COALESCE(SUM(p.pontos), 0) as total_pontos,
+          JSON_GROUP_ARRAY(
+            JSON_OBJECT('acao', p.acao, 'total', COALESCE(SUM(p.pontos), 0), 'count', COUNT(*))
+          ) as breakdown
+        FROM pontos p
+        WHERE p.usuario_id = ?
+      `, [req.user.id], (pointsErr, userPoints) => {
+        const breakdown = [];
+        if (!pointsErr && userPoints?.breakdown) {
+          try {
+            const parsed = JSON.parse(userPoints.breakdown);
+            breakdown.push(...(Array.isArray(parsed) ? parsed : []));
+          } catch (e) {
+            console.error('❌ [ADMIN] Erro ao parse breakdown:', e);
+          }
+        }
+        
+        res.json({
+          ok: true,
+          stats,
+          ranking: ranking || [],
+          userPoints: userPoints?.total_pontos || 0,
+          breakdown
+        });
+      });
+    });
+  });
+});
+
+// Gerenciamento de usuários (admin)
+app.get('/api/admin/users', authenticateUser, requireAdmin, (req, res) => {
+  console.log('👥 [ADMIN] GET /api/admin/users');
+  
+  db.all(`
+    SELECT 
+      id,
+      uuid,
+      nome,
+      email,
+      setor,
+      role,
+      ativo,
+      pontos,
+      created_at
+    FROM usuarios 
+    ORDER BY created_at DESC
+  `, (err, rows) => {
+    if (err) {
+      console.error('❌ [ADMIN] Erro ao carregar usuários:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao carregar usuários' });
+    }
+    
+    res.json({ ok: true, users: rows || [] });
+  });
+});
+
+app.post('/api/admin/users', authenticateUser, requireAdmin, async (req, res) => {
+  const { nome, email, senha, setor, role } = req.body;
+  
+  if (!nome || !email || !senha) {
+    return res.status(400).json({ ok: false, error: 'Nome, email e senha são obrigatórios' });
+  }
+  
+  try {
+    const hashedPassword = await bcrypt.hash(senha, 10);
+    const uuid = generateUUID();
+    
+    db.run(
+      'INSERT INTO usuarios (uuid, nome, email, senha, setor, role) VALUES (?, ?, ?, ?, ?, ?)',
+      [uuid, nome, email, hashedPassword, setor || 'Geral', role || 'colaborador'],
+      function(err) {
+        if (err) {
+          console.error('❌ [ADMIN] Erro ao criar usuário:', err);
+          if (err.message.includes('UNIQUE')) {
+            return res.status(400).json({ ok: false, error: 'Email já cadastrado' });
+          }
+          return res.status(500).json({ ok: false, error: 'Erro ao criar usuário' });
+        }
+        
+        res.json({ ok: true, id: uuid });
+      }
+    );
+  } catch (hashErr) {
+    console.error('❌ [ADMIN] Erro ao hash senha:', hashErr);
+    res.status(500).json({ ok: false, error: 'Erro interno' });
+  }
+});
+
+// Exportações (admin)
+app.get('/api/admin/export/ranking.:formato', authenticateUser, requireAdmin, (req, res) => {
+  const { formato } = req.params;
+  const { month } = req.query;
+  
+  console.log(`📊 [EXPORT] Exporting ranking as ${formato} for month ${month}`);
+  
+  if (!['csv', 'excel', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato inválido' });
+  }
+  
+  // Buscar dados do ranking
+  db.all(`
+    SELECT 
+      u.nome,
+      u.email,
+      u.setor,
+      COALESCE(SUM(p.pontos), 0) as total_pontos,
+      COUNT(p.id) as total_atividades
+    FROM usuarios u
+    LEFT JOIN pontos p ON u.id = p.usuario_id
+    WHERE u.ativo = 1
+    GROUP BY u.id
+    ORDER BY total_pontos DESC
+  `, (err, ranking) => {
+    if (err) {
+      console.error('❌ [EXPORT] Erro ao buscar ranking:', err);
+      return res.status(500).json({ ok: false, error: 'Erro ao gerar ranking' });
+    }
+    
+    if (formato === 'csv') {
+      // Gerar CSV
+      const csvHeader = 'Posição,Nome,Email,Setor,Pontos,Atividades\n';
+      const csvRows = ranking.map((user, index) => 
+        `${index + 1},"${user.nome}","${user.email}","${user.setor}",${user.total_pontos},${user.total_atividades}`
+      ).join('\n');
+      
+      const csvContent = csvHeader + csvRows;
+      
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="ranking-${month || 'atual'}.csv"`);
+      res.send('\ufeff' + csvContent); // BOM para UTF-8
+    } else {
+      // Para Excel e PDF, retornar dados estruturados
+      res.json({
+        ok: true,
+        formato,
+        data: ranking,
+        message: `Dados preparados para export ${formato.toUpperCase()}`
+      });
+    }
+  });
+});
+
+// Rota catch-all para SPAs (deve ser a última)
+app.get('*', (req, res) => {
+  // Para rotas de API que não existem
+  if (req.path.startsWith('/api/')) {
+    console.log('❌ [API] Rota não encontrada:', req.path);
+    return res.status(404).json({ 
+      ok: false, 
+      error: 'Route not found',
+      path: req.path,
+      method: req.method
+    });
+  }
+  
+  // Para outras rotas, servir o index.html (SPA)
+  const indexPath = path.join(__dirname, 'dist', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ ok: false, error: 'Application not built' });
+  }
+});
+
+// ==================== TRATAMENTO DE ERROS ROBUSTO ====================
+
+// Tratamento de erros não capturados
+process.on('uncaughtException', (error) => {
+  console.error('💥 [FATAL] Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  
+  // Não encerrar o processo, apenas logar
+  console.log('🔄 [RECOVERY] Processo mantido ativo após erro não capturado');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 [FATAL] Unhandled Rejection at:', promise);
+  console.error('Reason:', reason);
+  
+  // Não encerrar o processo, apenas logar
+  console.log('🔄 [RECOVERY] Processo mantido ativo após promise rejeitada');
+});
+
+// Tratamento de sinais do sistema
+process.on('SIGTERM', () => {
+  console.log('📡 [SIGNAL] SIGTERM recebido, encerrando graciosamente...');
+  
+  if (db) {
+    db.close((err) => {
+      if (err) {
+        console.error('❌ [DB] Erro ao fechar banco:', err);
+      } else {
+        console.log('✅ [DB] Banco fechado com sucesso');
+      }
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+});
+
+process.on('SIGINT', () => {
+  console.log('📡 [SIGNAL] SIGINT (Ctrl+C) recebido, encerrando graciosamente...');
+  
+  if (db) {
+    db.close((err) => {
+      if (err) {
+        console.error('❌ [DB] Erro ao fechar banco:', err);
+      } else {
+        console.log('✅ [DB] Banco fechado com sucesso');
+      }
+      process.exit(0);
+    });
+  } else {
+    process.exit(0);
+  }
+});
+
+// Middleware global de erro
+app.use((error, req, res, next) => {
+  console.error('💥 [ERROR] Middleware de erro capturou:', error);
+  
+  // Não deixar o erro derrubar o servidor
+  if (!res.headersSent) {
+    res.status(500).json({ 
+      ok: false, 
+      error: isDev ? error.message : 'Erro interno do servidor',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+// ==================== INICIALIZAÇÃO DO SERVIDOR ====================
+
+const startServer = async () => {
+  try {
+    console.log('🚀 [INIT] Iniciando servidor...');
+    console.log('🌍 [INIT] Ambiente:', process.env.NODE_ENV || 'development');
+    
+    // Inicializar banco de dados
+    await initializeDatabase();
+    
+    // Iniciar servidor HTTP
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      console.log('✅ [SERVER] Servidor rodando em:');
+      console.log(`   🌐 Local:    http://localhost:${PORT}`);
+      console.log(`   🌐 Network:  http://0.0.0.0:${PORT}`);
+      console.log('');
+      console.log('📚 [INFO] Rotas disponíveis:');
+      console.log('   🔐 POST /auth/login');
+      console.log('   🚪 POST /auth/logout');
+      console.log('   👤 GET  /api/me');
+      console.log('   📅 GET  /api/reservas');
+      console.log('   📢 GET  /api/mural/posts');
+      console.log('   🍽️ GET  /api/trocas-proteina');
+      console.log('   💻 GET  /api/ti/solicitacoes');
+      console.log('   🚪 GET  /api/portaria/agendamentos');
+      console.log('   📊 GET  /api/admin/dashboard');
+      console.log('');
+      console.log('🎯 [READY] Sistema pronto para uso!');
+    });
+    
+    // Configurar timeout do servidor
+    server.timeout = 30000; // 30 segundos
+    
+    // Tratamento de erro do servidor HTTP
+    server.on('error', (error) => {
+      console.error('💥 [SERVER] Erro no servidor HTTP:', error);
+      
+      if (error.code === 'EADDRINUSE') {
+        console.error(`❌ [SERVER] Porta ${PORT} já está em uso`);
+        console.log('💡 [TIP] Tente mudar a porta ou encerrar outros processos');
+      }
+    });
+    
+    // Configurar keep-alive
+    server.keepAliveTimeout = 65000; // 65 segundos
+    server.headersTimeout = 66000; // 66 segundos (deve ser > keep-alive)
+    
+  } catch (error) {
+    console.error('💥 [FATAL] Erro ao inicializar servidor:', error);
+    console.error('Stack:', error.stack);
+    
+    // Tentar novamente em 3 segundos
+    console.log('🔄 [RETRY] Tentando novamente em 3 segundos...');
+    setTimeout(startServer, 3000);
+  }
+};
+
+// Verificar dependências antes de iniciar
+const checkDependencies = () => {
+  const required = [
+    'express', 'cors', 'cookie-parser', 'express-session', 
+    'morgan', 'bcryptjs', 'jsonwebtoken', 'sqlite3', 
+    'passport', 'passport-local'
+  ];
+  
+  const missing = [];
+  
+  for (const dep of required) {
+    try {
+      require(dep);
+    } catch (e) {
+      missing.push(dep);
+    }
+  }
+  
+  if (missing.length > 0) {
+    console.error('❌ [DEPS] Dependências faltantes:', missing.join(', '));
+    console.log('💡 [TIP] Execute: npm install');
+    process.exit(1);
+  }
+  
+  console.log('✅ [DEPS] Todas as dependências estão disponíveis');
+};
+
+// Iniciar aplicação
+if (require.main === module) {
+  console.log('🎬 [START] Iniciando Intranet Cropfield...');
+  console.log('📅 [START] Timestamp:', new Date().toISOString());
+  
+  checkDependencies();
+  startServer();
+}
+
+module.exports = app;
