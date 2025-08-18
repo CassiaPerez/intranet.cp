@@ -1075,6 +1075,181 @@ app.get('/api/health', (req, res) => {
 });
 
 /* ===== Export Ranking ===== */
+app.get('/api/admin/export/activities.:formato', requireAuth, requireRole('admin', 'rh'), (req, res) => {
+  const formato = req.params.formato;
+  const month = req.query.month;
+  
+  console.log('[EXPORT-ACTIVITIES] Exporting activities format:', formato, 'month:', month);
+  
+  if (!['csv', 'excel', 'pdf'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato inválido. Use: csv, excel ou pdf' });
+  }
+
+  // Query para buscar todas as atividades do sistema
+  const query = `
+    SELECT 
+      'Mural Post' as tipo_atividade,
+      mp.titulo as descricao,
+      u.nome as usuario_nome,
+      u.email as usuario_email,
+      u.setor as usuario_setor,
+      mp.created_at as data_atividade,
+      15 as pontos
+    FROM mural_posts mp
+    LEFT JOIN usuarios u ON u.id = mp.user_id
+    WHERE mp.ativo = 1
+    
+    UNION ALL
+    
+    SELECT 
+      'Reserva Sala' as tipo_atividade,
+      'Reserva: ' || r.sala || ' - ' || r.assunto as descricao,
+      u.nome as usuario_nome,
+      u.email as usuario_email,
+      u.setor as usuario_setor,
+      r.created_at as data_atividade,
+      10 as pontos
+    FROM reservas r
+    LEFT JOIN usuarios u ON u.id = r.user_id
+    
+    UNION ALL
+    
+    SELECT 
+      'Troca Proteína' as tipo_atividade,
+      'Troca: ' || tp.proteina_original || ' → ' || tp.proteina_nova as descricao,
+      'Usuário' as usuario_nome,
+      tp.user_email as usuario_email,
+      'N/A' as usuario_setor,
+      tp.created_at as data_atividade,
+      5 as pontos
+    FROM trocas_proteina tp
+    
+    UNION ALL
+    
+    SELECT 
+      'Solicitação TI' as tipo_atividade,
+      'TI: ' || ts.titulo as descricao,
+      ts.user_nome as usuario_nome,
+      ts.user_email as usuario_email,
+      'N/A' as usuario_setor,
+      ts.created_at as data_atividade,
+      4 as pontos
+    FROM ti_solicitacoes ts
+    
+    ORDER BY data_atividade DESC
+    LIMIT 1000
+  `;
+
+  db.all(query, (err, rows) => {
+    if (err) {
+      console.error('[EXPORT-ACTIVITIES] Database error:', err.message);
+      return res.status(500).json({ ok: false, error: 'Database error' });
+    }
+
+    const dados = rows || [];
+    console.log('[EXPORT-ACTIVITIES] Found', dados.length, 'activities');
+
+    if (formato === 'csv') {
+      let csv = 'Tipo Atividade,Descrição,Usuário,Email,Setor,Data,Pontos\n';
+      dados.forEach((row) => {
+        const dataFormatada = new Date(row.data_atividade).toLocaleDateString('pt-BR');
+        csv += `"${row.tipo_atividade}","${row.descricao}","${row.usuario_nome}","${row.usuario_email}","${row.usuario_setor}","${dataFormatada}",${row.pontos}\n`;
+      });
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="atividades-${month || 'atual'}.csv"`);
+      return res.send('\ufeff' + csv);
+    }
+
+    if (formato === 'excel') {
+      const excel = dados.map((row) => ({
+        'Tipo': row.tipo_atividade,
+        'Descrição': row.descricao,
+        'Usuário': row.usuario_nome,
+        'Email': row.usuario_email,
+        'Setor': row.usuario_setor,
+        'Data': new Date(row.data_atividade).toLocaleDateString('pt-BR'),
+        'Pontos': row.pontos
+      }));
+
+      res.setHeader('Content-Type', 'application/json');
+      return res.json({ ok: true, data: excel, filename: `atividades-${month || 'atual'}.xlsx` });
+    }
+
+    if (formato === 'pdf') {
+      const pdfData = {
+        title: `Relatório de Atividades - ${month || 'Atual'}`,
+        headers: ['Tipo', 'Descrição', 'Usuário', 'Data', 'Pontos'],
+        rows: dados.map((row) => [
+          row.tipo_atividade,
+          row.descricao.substring(0, 50) + (row.descricao.length > 50 ? '...' : ''),
+          row.usuario_nome,
+          new Date(row.data_atividade).toLocaleDateString('pt-BR'),
+          row.pontos
+        ])
+      };
+
+      res.setHeader('Content-Type', 'application/json');
+      return res.json({ ok: true, data: pdfData, filename: `atividades-${month || 'atual'}.pdf` });
+    }
+
+    res.status(400).json({ ok: false, error: 'Formato não suportado' });
+  });
+});
+
+app.get('/api/admin/export/backup.:formato', requireAuth, requireRole('admin'), (req, res) => {
+  const formato = req.params.formato;
+  
+  console.log('[EXPORT-BACKUP] Exporting backup format:', formato);
+  
+  if (!['json', 'sql'].includes(formato)) {
+    return res.status(400).json({ ok: false, error: 'Formato inválido. Use: json ou sql' });
+  }
+
+  if (formato === 'json') {
+    // Export all data as JSON
+    const queries = [
+      'SELECT * FROM usuarios WHERE ativo = 1',
+      'SELECT * FROM mural_posts WHERE ativo = 1',
+      'SELECT * FROM mural_likes',
+      'SELECT * FROM mural_comments',
+      'SELECT * FROM reservas',
+      'SELECT * FROM ti_solicitacoes',
+      'SELECT * FROM trocas_proteina',
+      'SELECT * FROM portaria_agendamentos'
+    ];
+
+    const tableNames = ['usuarios', 'mural_posts', 'mural_likes', 'mural_comments', 'reservas', 'ti_solicitacoes', 'trocas_proteina', 'portaria_agendamentos'];
+    const results = {};
+    let completed = 0;
+
+    queries.forEach((query, index) => {
+      db.all(query, (err, rows) => {
+        results[tableNames[index]] = err ? [] : (rows || []);
+        completed++;
+        if (completed === queries.length) {
+          const backupData = {
+            backup_date: new Date().toISOString(),
+            version: '1.0.0',
+            tables: results
+          };
+
+          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Content-Disposition', `attachment; filename="backup-${new Date().toISOString().slice(0, 10)}.json"`);
+          return res.json(backupData);
+        }
+      });
+    });
+  } else {
+    // SQL export is more complex, return JSON with SQL commands
+    res.json({ 
+      ok: true, 
+      message: 'Backup SQL não implementado ainda. Use formato JSON.',
+      suggestion: 'Use /api/admin/export/backup.json'
+    });
+  }
+});
+
 app.get('/api/admin/config', requireAuth, requireRole('admin', 'rh'), (req, res) => {
   console.log('[ADMIN-CONFIG] Loading system configuration...');
   

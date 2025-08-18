@@ -437,9 +437,20 @@ export const AdminPanel: React.FC = () => {
                 <p className="text-sm text-gray-600 mb-4">
                   Relatório detalhado de todas as atividades do sistema
                 </p>
-                <button className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors">
-                  Gerar Relatório
-                </button>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleExportActivities('csv')}
+                    className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                  >
+                    Exportar Atividades CSV
+                  </button>
+                  <button
+                    onClick={() => handleExportActivities('excel')}
+                    className="w-full bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors text-sm"
+                  >
+                    Exportar Atividades Excel
+                  </button>
+                </div>
               </div>
 
               <div className="bg-white rounded-xl p-6 shadow-sm border border-gray-100">
@@ -447,9 +458,20 @@ export const AdminPanel: React.FC = () => {
                 <p className="text-sm text-gray-600 mb-4">
                   Fazer backup completo dos dados do sistema
                 </p>
-                <button className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
-                  Fazer Backup
-                </button>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleExportBackup('json')}
+                    className="w-full bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors text-sm"
+                  >
+                    Backup JSON
+                  </button>
+                  <button
+                    onClick={() => handleExportBackup('sql')}
+                    className="w-full bg-gray-500 text-white px-4 py-2 rounded-lg hover:bg-gray-600 transition-colors text-sm"
+                  >
+                    Backup SQL
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -679,6 +701,65 @@ export const AdminPanel: React.FC = () => {
 };
 
 // Helper functions
+const handleExportActivities = async (formato: 'csv' | 'excel' | 'pdf') => {
+  try {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const response = await fetch(`/api/admin/export/activities.${formato}?month=${currentMonth}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'csv') {
+        const csvData = await response.text();
+        const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `atividades-${currentMonth}.csv`;
+        link.click();
+        toast.success('Relatório de atividades baixado!');
+      } else {
+        const data = await response.json();
+        toast.success(`Dados de atividades preparados para ${formato.toUpperCase()}`);
+        console.log('Activities export data:', data);
+      }
+    } else {
+      toast.error(`Erro ao exportar atividades ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Activities export error:', error);
+    toast.error('Erro ao exportar atividades');
+  }
+};
+
+const handleExportBackup = async (formato: 'json' | 'sql') => {
+  try {
+    const response = await fetch(`/api/admin/export/backup.${formato}`, {
+      credentials: 'include'
+    });
+
+    if (response.ok) {
+      if (formato === 'json') {
+        const backupData = await response.json();
+        const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `backup-${new Date().toISOString().slice(0, 10)}.json`;
+        link.click();
+        toast.success('Backup baixado com sucesso!');
+      } else {
+        const data = await response.json();
+        toast.success(data.message || `Backup ${formato.toUpperCase()} processado`);
+        console.log('Backup data:', data);
+      }
+    } else {
+      toast.error(`Erro ao gerar backup ${formato.toUpperCase()}`);
+    }
+  } catch (error) {
+    console.error('Backup export error:', error);
+    toast.error('Erro ao gerar backup');
+  }
+};
+
 const handleResetPassword = async (userId: string) => {
   const newPassword = prompt('Digite a nova senha (mínimo 6 caracteres):');
   if (!newPassword || newPassword.length < 6) {
