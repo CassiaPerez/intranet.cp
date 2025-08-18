@@ -1043,6 +1043,10 @@ app.post('/api/debug/recreate-users', requireAuth, requireRole('admin'), (req, r
       res.json({ message: 'Demo users recreated', users: users || [], count: users?.length || 0 });
     });
   }).catch((error) => {
+    console.error('[DEBUG] Error recreating users:', error);
+    res.status(500).json({ error: 'Failed to recreate users' });
+  });
+});
 
 // Helper para gerar dados de export
 const generateExportData = async (type) => {
@@ -1072,11 +1076,6 @@ const generateExportData = async (type) => {
   return data;
 };
 
-    console.error('[DEBUG] Error recreating users:', error);
-    res.status(500).json({ error: 'Failed to recreate users' });
-  });
-});
-
 app.get('/api/debug/users', (req, res) => {
   db.all('SELECT id, nome, email, setor, role, ativo, created_at FROM usuarios', (err, users) => {
     if (err) return res.status(500).json({ error: 'Database error' });
@@ -1089,10 +1088,15 @@ app.get('/api/debug/users', (req, res) => {
   });
 });
 
+app.get('/api/export/:type', requireAuth, requireRole('admin', 'rh'), async (req, res) => {
+  try {
+    const { type } = req.params;
+    const { formato = 'json' } = req.query;
+    
     const exportData = await generateExportData(type);
-        timestamp: new Date().toISOString()
+    
     console.log(`[EXPORT] Generated ${type} export:`, exportData.rows?.length || 0, 'records');
-    }
+    
     res.json({
       ok: true,
       status: 'healthy',
@@ -1104,7 +1108,10 @@ app.get('/api/debug/users', (req, res) => {
       generated_by: req.user.name,
       timestamp: new Date().toISOString()
     });
-  });
+  } catch (error) {
+    console.error('[EXPORT] Error:', error.message);
+    res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 // Catch-all API route para endpoints inexistentes sob /api/*
