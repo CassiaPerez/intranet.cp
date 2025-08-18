@@ -10,7 +10,7 @@ const sqlite3 = require('sqlite3').verbose();
 
 // ==================== CONFIG BÁSICA ====================
 const app = express();
-const PORT = process.env.PORT || 3006;
+const PORT = process.env.PORT || 3005;
 const isDev = process.env.NODE_ENV !== 'production';
 
 console.log('🚀 [INIT] Iniciando servidor...');
