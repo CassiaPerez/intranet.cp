@@ -1,4 +1,6 @@
 // ==== server.cjs (completo e corrigido) ====
+// Backend Express + SQLite: Auth, Mural, Reservas, TI, Trocas, Portaria, Admin/Relatórios
+
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
@@ -10,9 +12,9 @@ const path = require('path');
 const fs = require('fs');
 
 const app = express();
-const PORT = 3005;
+const PORT = Number(process.env.PORT) || 3005;
 const MAX_PORT_RETRIES = 5;
-const JWT_SECRET = 'your-secret-key-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
 // Parsing (uma única vez)
 app.use(express.json({ limit: '1mb' }));
@@ -41,7 +43,6 @@ if (fs.existsSync(DB_PATH)) {
     }
   } catch (error) {
     console.log('[SERVER] ⚠️ Error checking database file:', error.message);
-    // Don't delete on check error - could be temporary permission issue
     console.log('[SERVER] Will attempt to connect anyway...');
   }
 } else {
@@ -55,7 +56,6 @@ const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE | sqlite3.OPEN_C
     console.error('[SERVER] ⚠️ Server will continue but database features may not work');
   } else {
     console.log('[SERVER] ✅ Connected to SQLite database');
-    // Set SQLite optimizations with error handling
     try {
       db.run('PRAGMA journal_mode=WAL;');
       db.run('PRAGMA foreign_keys = ON;');
@@ -83,13 +83,7 @@ const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
 // Demo users (corrigido: sem forçar id, grava senha e senha_hash)
 const createDemoUsers = () => new Promise((resolve) => {
   console.log('[DEMO] 🔄 Creating demo users...');
-  
-  // Check if database is ready first
-  if (!db || db.readyState === 'closed') {
-    console.log('[DEMO] ⚠️ Database not ready, skipping demo users');
-    return resolve(false);
-  }
-  
+
   const users = [
     { username: 'admin',         nome: 'Super Admin',  email: 'superadmin@grupocropfield.com.br', senha: 'admin',    setor: 'TI',    role: 'admin' },
     { username: 'administrador', nome: 'Administrador', email: 'admin@grupocropfield.com.br',     senha: 'admin123', setor: 'TI',    role: 'admin' },
@@ -100,11 +94,6 @@ const createDemoUsers = () => new Promise((resolve) => {
 
   let processed = 0;
   const checkAndCreate = (retries = 10) => {
-    if (!db || db.readyState === 'closed') {
-      console.log('[DEMO] ⚠️ Database closed during demo user creation');
-      return resolve(false);
-    }
-    
     db.get("SELECT name FROM sqlite_master WHERE type='table' AND name='usuarios'", async (err, row) => {
       if (err) {
         console.error('[DEMO] ⚠️ Database error checking table:', err.message);
@@ -166,12 +155,7 @@ const createDemoUsers = () => new Promise((resolve) => {
 // Criação de tabelas + migração defensiva
 const initializeDatabase = () => {
   console.log('[DB] Creating tables...');
-  
-  if (!db || db.readyState === 'closed') {
-    console.log('[DB] ⚠️ Database not ready for initialization');
-    return;
-  }
-  
+
   const tables = [];
   const expectedTables = 8;
 
@@ -190,15 +174,8 @@ const initializeDatabase = () => {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `, (err) => {
-    if (err) {
-      console.error('[DB] ⚠️ Error creating usuarios table:', err.message);
-    }
-    else {
-      console.log('[DB] ✅ usuarios table ready');
-      tables.push('usuarios');
-      // Skip migration for now to avoid complexity
-      checkAllReady();
-    }
+    if (err) console.error('[DB] ⚠️ Error creating usuarios table:', err.message);
+    else { console.log('[DB] ✅ usuarios table ready'); tables.push('usuarios'); checkAllReady(); }
   });
 
   db.run(`
@@ -295,10 +272,18 @@ const initializeDatabase = () => {
     )
   `, (err) => { if (err) console.error('[DB] ❌ portaria_agendamentos:', err.message); else { tables.push('portaria_agendamentos'); console.log('[DB] ✅ portaria_agendamentos table ready'); checkAllReady(); } });
 
+  const createIndexes = () => {
+    db.run(`CREATE INDEX IF NOT EXISTS idx_reservas_sala_data ON reservas (sala, data)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_mural_posts_created ON mural_posts (created_at DESC)`);
+    db.run(`CREATE INDEX IF NOT EXISTS idx_ti_solicitacoes_created ON ti_solicitacoes (created_at DESC)`);
+    db.run(`CREATE UNIQUE INDEX IF NOT EXISTS ux_trocas_user_data ON trocas_proteina (user_email, data)`);
+    console.log('[DB] ✅ Indexes ensured');
+  };
+
   const checkAllReady = () => {
     if (tables.length === expectedTables) {
-      console.log('[DB] ✅ All tables created, initializing demo users...');
-      // Use setTimeout to avoid blocking the main thread
+      console.log('[DB] ✅ All tables created, creating indexes and initializing demo users...');
+      createIndexes();
       setTimeout(() => {
         createDemoUsers().then((ok) => {
           if (ok) console.log('[DB] ✅ Database initialization complete');
@@ -306,19 +291,19 @@ const initializeDatabase = () => {
         }).catch((e) => {
           console.log('[DB] ⚠️ Demo users creation failed (non-critical):', e.message);
         });
-      }, 2000);
+      }, 1000);
     }
   };
 
   console.log('[SERVER] Database tables setup initiated');
 };
 
-// Initialize database with timeout to prevent blocking
+// Initialize database com leve atraso
 setTimeout(() => {
-  try { 
-    initializeDatabase(); 
-  } catch (error) { 
-    console.error('[DB] ⚠️ Error during database initialization:', error.message); 
+  try {
+    initializeDatabase();
+  } catch (error) {
+    console.error('[DB] ⚠️ Error during database initialization:', error.message);
   }
 }, 1000);
 
@@ -326,18 +311,23 @@ setTimeout(() => {
 app.use(morgan('combined'));
 app.use(cookieParser());
 
-// CORS
+// CORS por ambiente (permite múltiplas origens via env)
+const ORIGINS = (process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173').split(',');
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://localhost:5173'],
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true);
+    const ok = ORIGINS.some(o => origin.startsWith(o));
+    cb(ok ? null : new Error('CORS not allowed'), ok ? true : undefined);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 /* ===== Auth ===== */
 const requireAuth = (req, res, next) => {
   console.log('[AUTH] 🔐 Checking authentication...');
-  const token = req.cookies.sid || req.headers.authorization?.replace('Bearer ', '');
+  const token = req.cookies.sid || (req.headers.authorization || '').replace('Bearer ', '');
   if (!token) return res.status(401).json({ ok: false, error: 'Authentication required' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -373,10 +363,10 @@ const requireRole = (...roles) => (req, res, next) => {
 app.post('/auth/login', (req, res) => {
   console.log('[LOGIN] Login attempt:', req.body.username || req.body.email);
   const { username, email, password } = req.body;
-  const loginField = username || email;
+  const loginField = (username || email || '').trim().toLowerCase();
   if (!loginField || !password) return res.status(400).json({ ok: false, error: 'Username e senha são obrigatórios' });
 
-  db.get('SELECT * FROM usuarios WHERE (username = ? OR email = ?) AND ativo = 1',
+  db.get('SELECT * FROM usuarios WHERE (LOWER(username) = ? OR LOWER(email) = ?) AND ativo = 1',
     [loginField, loginField],
     (err, user) => {
       if (err) return res.status(500).json({ ok: false, error: 'Database error' });
@@ -405,8 +395,8 @@ app.post('/auth/login', (req, res) => {
 
         res.cookie('sid', token, {
           httpOnly: true,
-          secure: false,
-          sameSite: 'lax',
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
           maxAge: 7 * 24 * 60 * 60 * 1000
         });
 
@@ -419,8 +409,7 @@ app.post('/auth/login', (req, res) => {
             email: user.email,
             sector: user.setor,
             setor: user.setor,
-            role: user.role,
-            avatar: user.avatar_url
+            role: user.role
           },
           token
         });
@@ -509,6 +498,39 @@ app.post('/api/mural/posts', requireAuth, requireRole('rh', 'admin', 'ti'), (req
   );
 });
 
+app.get('/api/mural/posts/:id', (req, res) => {
+  const postId = req.params.id;
+  db.get(
+    `SELECT id, titulo, conteudo, author, pinned, created_at,
+            (SELECT COUNT(*) FROM mural_likes WHERE post_id = mural_posts.id) as likes_count,
+            (SELECT COUNT(*) FROM mural_comments WHERE post_id = mural_posts.id) as comments_count
+     FROM mural_posts WHERE id = ? AND ativo = 1`,
+    [postId],
+    (err, row) => {
+      if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+      if (!row) return res.status(404).json({ ok: false, error: 'Post não encontrado' });
+      res.json({ ok: true, post: row });
+    }
+  );
+});
+
+app.get('/api/mural/posts/:id/comments', (req, res) => {
+  const postId = req.params.id;
+  db.all(
+    `SELECT mc.id, mc.texto, mc.created_at,
+            u.nome as autor_nome, u.email as autor_email, u.setor as autor_setor
+     FROM mural_comments mc
+     LEFT JOIN usuarios u ON u.id = mc.user_id
+     WHERE mc.post_id = ?
+     ORDER BY mc.created_at ASC`,
+    [postId],
+    (err, rows) => {
+      if (err) return res.status(500).json({ ok: false, error: 'Database error' });
+      res.json({ ok: true, comments: rows || [] });
+    }
+  );
+});
+
 app.patch('/api/mural/posts/:id', requireAuth, requireRole('rh', 'admin'), (req, res) => {
   const { titulo, conteudo, pinned } = req.body;
   const postId = req.params.id;
@@ -589,22 +611,45 @@ app.get('/api/reservas', requireAuth, (req, res) => {
   });
 });
 
-app.post('/api/reservas', requireAuth, (req, res) => {
+// Verificação de conflito (overlap) + validações
+app.post('/api/reservas', requireAuth, async (req, res) => {
   const { sala, data, inicio, fim, assunto } = req.body;
   const userId = req.user.id;
   const userName = req.user.name;
-  if (!sala || !data || !inicio || !fim || !assunto) return res.status(400).json({ ok: false, error: 'Todos os campos são obrigatórios' });
 
-  const reservaId = `reserva_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-  db.run(
-    `INSERT INTO reservas (id, user_id, sala, data, inicio, fim, assunto, responsavel) 
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [reservaId, userId, sala, data, inicio, fim, assunto, userName],
-    function (err) {
-      if (err) return res.status(500).json({ ok: false, error: 'Database error' });
-      res.json({ ok: true, id: reservaId, points: 10, message: 'Reserva criada com sucesso' });
+  if (!sala || !data || !inicio || !fim || !assunto) {
+    return res.status(400).json({ ok: false, error: 'Todos os campos são obrigatórios' });
+  }
+  if (String(fim) <= String(inicio)) {
+    return res.status(400).json({ ok: false, error: 'Horário final deve ser maior que o inicial' });
+  }
+
+  try {
+    const overlap = await dbGet(
+      `SELECT id FROM reservas 
+       WHERE sala = ? AND data = ?
+         AND (? < fim AND ? > inicio)`,
+      [sala, data, inicio, fim]
+    );
+
+    if (overlap) {
+      return res.status(409).json({
+        ok: false,
+        error: 'Conflito de horário: já existe reserva nesse intervalo para esta sala'
+      });
     }
-  );
+
+    const reservaId = `reserva_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    await dbRun(
+      `INSERT INTO reservas (id, user_id, sala, data, inicio, fim, assunto, responsavel) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [reservaId, userId, sala, data, inicio, fim, assunto, userName]
+    );
+    res.json({ ok: true, id: reservaId, points: 10, message: 'Reserva criada com sucesso' });
+  } catch (err) {
+    console.error('[RESERVAS] Erro:', err.message);
+    res.status(500).json({ ok: false, error: 'Database error' });
+  }
 });
 
 /* ===== TI - Equipamentos ===== */
@@ -777,7 +822,6 @@ app.get('/api/admin/users', requireAuth, requireRole('admin', 'rh'), (req, res) 
     });
 });
 
-// Add missing admin routes that might be called by frontend
 app.get('/api/admin/dashboard', requireAuth, requireRole('admin', 'rh'), (req, res) => {
   const queries = [
     { name: 'usuarios', sql: 'SELECT COUNT(*) as count FROM usuarios WHERE ativo = 1' },
@@ -787,7 +831,7 @@ app.get('/api/admin/dashboard', requireAuth, requireRole('admin', 'rh'), (req, r
     { name: 'trocas_proteina', sql: 'SELECT COUNT(*) as count FROM trocas_proteina' },
     { name: 'portaria_agendamentos', sql: 'SELECT COUNT(*) as count FROM portaria_agendamentos' },
   ];
-  
+
   const results = {};
   let completed = 0;
 
@@ -807,7 +851,6 @@ app.get('/api/admin/dashboard', requireAuth, requireRole('admin', 'rh'), (req, r
 });
 
 app.get('/api/admin/stats', requireAuth, requireRole('admin', 'rh'), (req, res) => {
-  // Redirect to dashboard stats
   req.url = '/api/admin/dashboard';
   app._router.handle(req, res);
 });
@@ -816,14 +859,12 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
   console.log('[ADMIN-POST-USER] 👤 Creating user:', req.body?.email || 'no email');
   const { nome, email, senha, password, setor, role } = req.body;
   const senhaFinal = senha || password;
-  
-  // Normalize and validate input
+
   const emailNormalizado = email?.trim().toLowerCase() || '';
   const nomeNormalizado = nome?.trim() || '';
   const setorNormalizado = setor?.trim() || 'Colaborador';
   const roleNormalizado = role?.trim() || 'colaborador';
 
-  // Validation
   const setoresValidos = ['TI', 'RH', 'Colaborador', 'Geral'];
   const rolesValidos = ['admin', 'rh', 'colaborador'];
 
@@ -855,7 +896,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
 
       console.log('[ADMIN-POST-USER] 🔐 Hashing password...');
       const hashed = await bcrypt.hash(senhaFinal, 10);
-      
+
       console.log('[ADMIN-POST-USER] 💾 Inserting user into database...');
       const result = await dbRun(
         `INSERT INTO usuarios (nome, email, senha_hash, setor, role, ativo)
@@ -864,7 +905,7 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
       );
 
       console.log('[ADMIN-POST-USER] ✅ User created successfully with ID:', result.lastID);
-      
+
       res.status(201).json({
         ok: true,
         id: result.lastID,
@@ -879,11 +920,11 @@ app.post('/api/admin/users', requireAuth, requireRole('admin'), (req, res) => {
     } catch (error) {
       console.error('[ADMIN-POST-USER] ❌ Error:', error.message);
       console.error('[ADMIN-POST-USER] ❌ Stack:', error.stack);
-      
+
       if (String(error.message).includes('UNIQUE constraint failed')) {
         return res.status(409).json({ ok: false, error: 'E-mail já cadastrado' });
       }
-      
+
       if (!res.headersSent) {
         res.status(500).json({ ok: false, error: 'Erro interno ao criar usuário' });
       }
@@ -970,7 +1011,7 @@ app.get('/api/admin/reports', requireAuth, requireRole('admin', 'rh'), (req, res
 });
 
 /* ===== Debug helpers ===== */
-app.post('/api/debug/recreate-users', (req, res) => {
+app.post('/api/debug/recreate-users', requireAuth, requireRole('admin'), (req, res) => {
   console.log('[DEBUG] Force recreating demo users...');
   createDemoUsers().then(() => {
     db.all('SELECT email, nome, role, setor FROM usuarios WHERE ativo = 1', (err, users) => {
@@ -999,14 +1040,14 @@ app.get('/api/debug/users', (req, res) => {
 app.get('/api/health', (req, res) => {
   db.get("SELECT 1 as test", (err, row) => {
     if (err) {
-      return res.status(500).json({ 
-        ok: false, 
+      return res.status(500).json({
+        ok: false,
         error: 'Database connection failed',
         timestamp: new Date().toISOString()
       });
     }
-    res.json({ 
-      ok: true, 
+    res.json({
+      ok: true,
       status: 'healthy',
       database: 'connected',
       timestamp: new Date().toISOString()
@@ -1014,11 +1055,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Catch-all API route for debugging
+// Catch-all API route para endpoints inexistentes sob /api/*
 app.all('/api/*', (req, res) => {
   console.log('[SERVER] 404 - API route not found:', req.method, req.url);
-  res.status(404).json({ 
-    ok: false, 
+  res.status(404).json({
+    ok: false,
     error: 'API route not found',
     method: req.method,
     path: req.url,
@@ -1039,26 +1080,6 @@ app.use((err, req, res, next) => {
 });
 
 /* ===== Start ===== */
-const findAvailablePort = async (startPort, maxRetries = 5) => {
-  for (let port = startPort; port < startPort + maxRetries; port++) {
-    try {
-      const server = app.listen(port);
-      console.log(`[SERVER] 🚀 Backend server running on http://localhost:${port}`);
-      console.log(`[SERVER] 🎯 Ready to receive API requests`);
-      return server;
-    } catch (error) {
-      if (error.code === 'EADDRINUSE') {
-        console.log(`[SERVER] ⚠️ Port ${port} is in use, trying ${port + 1}...`);
-        continue;
-      } else {
-        console.error('[SERVER] ⚠️ Server error:', error.message);
-        throw error;
-      }
-    }
-  }
-  throw new Error(`Could not find available port after ${maxRetries} attempts`);
-};
-
 const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
   if (retries <= 0) {
     console.error('[SERVER] ❌ Failed to start server after multiple attempts');
@@ -1068,7 +1089,6 @@ const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
   const server = app.listen(port, () => {
     console.log(`[SERVER] 🚀 Backend server running on http://localhost:${port}`);
     console.log(`[SERVER] 🎯 Ready to receive API requests`);
-    console.log(`[SERVER] 📊 Export routes available at /api/export/*`);
   });
 
   server.on('error', (error) => {
@@ -1081,7 +1101,7 @@ const tryStartServer = (port, retries = MAX_PORT_RETRIES) => {
   });
 
   server.on('close', () => console.log('[SERVER] Server closed'));
-  
+
   return server;
 };
 
