@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-const API_BASE = '';
+// Se definir no .env do frontend: VITE_API_URL=http://localhost:3006
+// o client vai falar direto com o backend; senão, usa rotas relativas (exigem proxy no Vite).
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 interface User {
   id: string;
@@ -34,124 +36,130 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
+/** Helpers de rede **/
+function buildUrl(path: string) {
+  if (!path.startsWith('/')) path = '/' + path;
+  return API_BASE ? `${API_BASE}${path}` : path;
+}
+
+async function apiFetch<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await fetch(buildUrl(path), {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
+    ...init,
+  });
+
+  const ct = res.headers.get('content-type') || '';
+  const text = await res.text();
+
+  // evita "Unexpected token <" ao tentar parsear HTML
+  if (!ct.includes('application/json')) {
+    const snippet = text.slice(0, 160).replace(/\s+/g, ' ');
+    throw new Error(`Resposta não-JSON (${res.status}) em ${path}. CT="${ct}". Trecho: ${snippet}`);
+  }
+
+  let json: any;
+  try {
+    json = JSON.parse(text);
+  } catch (e: any) {
+    throw new Error(`Falha ao parsear JSON de ${path}: ${e.message}`);
+  }
+
+  if (!res.ok) {
+    throw new Error(json?.error || `Erro ${res.status}`);
+  }
+  return json as T;
+}
+
+function normalizeUser(u: any): User {
+  const user: User = {
+    id: u.id,
+    name: u.name || u.nome || '',
+    email: u.email,
+    setor: u.setor || u.sector || '',
+    sector: u.sector || u.setor || '',
+    role: u.role || '',
+    avatar: u.avatar,
+    token: u.token,
+  };
+  if (!user.role) {
+    if (user.email === 'admin@grupocropfield.com.br' || user.sector === 'TI' || user.setor === 'TI') {
+      user.role = 'admin';
+    } else if (user.sector === 'RH' || user.setor === 'RH') {
+      user.role = 'rh';
+    } else {
+      user.role = 'colaborador';
+    }
+  }
+  return user;
+}
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
+  useEffect(() => { checkAuth(); /* eslint-disable-next-line */ }, []);
 
   const checkAuth = async () => {
     setLoading(true);
     try {
       console.log('[AUTH] Starting auth check...');
-      
-      // Check if user is stored in localStorage first
+
+      // 1) tenta localStorage pra UX rápida
       const storedUser = localStorage.getItem('currentUser');
       if (storedUser) {
         try {
-          const userData = JSON.parse(storedUser);
-          console.log('[AUTH] Found stored user:', userData.email);
-          
-          // Normalize user data structure for compatibility
-          if (userData && userData.email) {
-            // Ensure both sector and setor exist
-            if (userData.sector && !userData.setor) {
-              userData.setor = userData.sector;
-            }
-            if (userData.setor && !userData.sector) {
-              userData.sector = userData.setor;
-            }
-            // Ensure role exists
-            if (!userData.role) {
-              if (userData.email === 'admin@grupocropfield.com.br' || userData.sector === 'TI' || userData.setor === 'TI') {
-                userData.role = 'admin';
-              } else if (userData.sector === 'RH' || userData.setor === 'RH') {
-                userData.role = 'rh';
-              } else {
-                userData.role = 'colaborador';
-              }
-            }
-            console.log('User data normalized:', userData);
-            setUser(userData);
+          const parsed = JSON.parse(storedUser);
+          if (parsed && parsed.email) {
+            const normalized = normalizeUser(parsed);
+            console.log('[AUTH] Found stored user:', normalized.email);
+            setUser(normalized);
             setIsAuthenticated(true);
-            setLoading(false);
-            
-            // Verify with backend that session is still valid
-            try {
-              const verifyResponse = await fetch('/api/me', {
-                credentials: 'include'
-              });
-              
-              if (!verifyResponse.ok) {
-                console.log('[AUTH] Session expired, clearing stored user');
-                localStorage.removeItem('currentUser');
-                setUser(null);
-                setIsAuthenticated(false);
-              }
-            } catch (verifyError) {
-              console.log('[AUTH] Cannot verify session with backend, but keeping local auth');
-            }
-            
-            return;
+
+            // verifica no backend em background
+            apiFetch<{ user: any }>('/api/me')
+              .then((me) => {
+                if (me?.user) {
+                  const apiUser = normalizeUser(me.user);
+                  setUser(apiUser);
+                  setIsAuthenticated(true);
+                  localStorage.setItem('currentUser', JSON.stringify(apiUser));
+                } else {
+                  console.warn('[AUTH] /api/me sem user; limpando sessão local');
+                  localStorage.removeItem('currentUser');
+                  setUser(null);
+                  setIsAuthenticated(false);
+                }
+              })
+              .catch((err) => {
+                console.warn('[AUTH] verificação /api/me falhou (mantendo local):', err?.message || err);
+              })
+              .finally(() => setLoading(false));
+
+            return; // encerra aqui: loading será atualizado no finally acima
           }
-        } catch (error) {
-          console.error('Error parsing stored user:', error);
+        } catch {
+          console.warn('[AUTH] currentUser inválido; limpando');
           localStorage.removeItem('currentUser');
         }
       }
 
-      // Try API call as fallback
+      // 2) sem localStorage, tenta sessão no backend (cookie)
       try {
-        const response = await fetch('/api/me', {
-          credentials: 'include'
-        });
-        
-        if (response.ok) {
-          const responseText = await response.text();
-          if (responseText) {
-            try {
-              const data = JSON.parse(responseText);
-              // Normalize API user data
-              if (data.user) {
-                if (data.user.sector && !data.user.setor) {
-                  data.user.setor = data.user.sector;
-                }
-                if (data.user.setor && !data.user.sector) {
-                  data.user.sector = data.user.setor;
-                }
-                if (!data.user.role) {
-                  if (data.user.email === 'admin@grupocropfield.com.br' || data.user.sector === 'TI' || data.user.setor === 'TI') {
-                    data.user.role = 'admin';
-                  } else if (data.user.sector === 'RH' || data.user.setor === 'RH') {
-                    data.user.role = 'rh';
-                  } else {
-                    data.user.role = 'colaborador';
-                  }
-                }
-                // Preserve token if returned by API
-                if (data.token) {
-                  data.user.token = data.token;
-                }
-                console.log('API user data normalized:', data.user);
-                setUser(data.user);
-                setIsAuthenticated(true);
-                localStorage.setItem('currentUser', JSON.stringify(data.user));
-                setLoading(false);
-                return;
-              }
-            } catch (parseError) {
-              console.error('Failed to parse auth response:', parseError);
-            }
-          }
+        const me = await apiFetch<{ user: any }>('/api/me');
+        if (me?.user) {
+          const apiUser = normalizeUser(me.user);
+          setUser(apiUser);
+          setIsAuthenticated(true);
+          localStorage.setItem('currentUser', JSON.stringify(apiUser));
+          return;
         }
-      } catch (apiError) {
-        console.log('API not available, using local auth');
+      } catch (e: any) {
+        console.warn('[AUTH] /api/me falhou:', e.message);
       }
 
-      // If no stored user and API fails, user is not authenticated
+      // 3) não autenticado
       setUser(null);
       setIsAuthenticated(false);
     } catch (error) {
@@ -165,15 +173,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const logout = async () => {
     try {
-      // Clear localStorage first
       localStorage.removeItem('currentUser');
-      
-      await fetch('/auth/logout', {
-        method: 'POST',
-        credentials: 'include'
-      });
+      await apiFetch('/auth/logout', { method: 'POST' });
     } catch (error) {
       console.error('Logout error:', error);
+      // mesmo se falhar, limpa lado cliente
     } finally {
       setUser(null);
       setIsAuthenticated(false);
@@ -181,14 +185,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        logout,
-        isAuthenticated,
-        loading,
-      }}
-    >
+    <AuthContext.Provider value={{ user, logout, isAuthenticated, loading }}>
       {children}
     </AuthContext.Provider>
   );
