@@ -11,18 +11,19 @@ const sqlite3 = require('sqlite3').verbose();
 
 // ==================== CONFIG ====================
 const app = express();
-const PORT = process.env.PORT || 3005; // mantenha 3005 se seu Vite proxy aponta pra essa porta
+const PORT = process.env.PORT || 3005; // use 3005 se o proxy do Vite aponta pra essa porta
 const isDev = process.env.NODE_ENV !== 'production';
 
 console.log('🚀 [INIT] Iniciando servidor Intranet Cropfield...');
 console.log('🌍 [ENV] Ambiente:', isDev ? 'DESENVOLVIMENTO' : 'PRODUÇÃO');
 
-// Diretório de dados e banco
+// Diretório de dados
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
   console.log('📁 [INIT] Diretório data/ criado');
 }
+
 const dbPath = path.join(dataDir, 'database.sqlite');
 let db;
 
@@ -42,15 +43,16 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Sessões
+// Sessão (cookie de dev tolerante)
 app.use(session({
   secret: 'cropfield-intranet-secret-2025',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: false, // HTTP local
+    secure: false,      // em dev/HTTP
     httpOnly: true,
-    maxAge: 24 * 60 * 60 * 1000 // 24h
+    sameSite: 'lax',    // garante envio do cookie via navegação
+    maxAge: 24 * 60 * 60 * 1000
   }
 }));
 
@@ -72,9 +74,11 @@ const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
     resolve({ lastID: this.lastID, changes: this.changes });
   });
 });
+
 const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
   db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
 });
+
 const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
   db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || []));
 });
@@ -192,7 +196,10 @@ const createDefaultUsers = async () => {
     const exists = await dbGet('SELECT id FROM usuarios WHERE email = ?', [email]);
     if (!exists) {
       const hash = await bcrypt.hash(senha, 10);
-      await dbRun('INSERT INTO usuarios (nome, email, senha, setor, role) VALUES (?, ?, ?, ?, ?)', [nome, email, hash, setor, role]);
+      await dbRun(
+        'INSERT INTO usuarios (nome, email, senha, setor, role) VALUES (?, ?, ?, ?, ?)',
+        [nome, email, hash, setor, role]
+      );
       console.log(`👤 [DB] Seed criado: ${email}`);
     }
   };
@@ -247,12 +254,16 @@ app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ ok: false, error: 'Email e senha são obrigatórios' });
+
     const user = await dbGet('SELECT * FROM usuarios WHERE email = ? AND ativo = 1', [email]);
     if (!user) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+
     const ok = await bcrypt.compare(password, user.senha);
     if (!ok) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
+
     req.session.userId = user.id;
     req.session.userEmail = user.email;
+
     const payload = { id: user.id, name: user.nome, email: user.email, sector: user.setor, setor: user.setor, role: user.role, avatar: user.foto };
     res.json({ ok: true, user: payload });
   } catch (e) {
@@ -282,8 +293,9 @@ app.get('/api/admin/users', authenticate, async (_req, res) => {
 
 app.post('/api/admin/users', authenticate, async (req, res) => {
   try {
-    // aceita nome OU name, e senha OU password
     let { nome, name, email, senha, password, setor = 'Geral', role = 'colaborador' } = req.body || {};
+
+    // normalização campos
     nome = (nome || name || '').trim();
     email = (email || '').trim().toLowerCase();
     const senhaRaw = (senha ?? password ?? '').toString();
@@ -431,7 +443,7 @@ app.post('/api/mural/:postId/comments', authenticate, async (req, res) => {
   try {
     const { texto } = req.body || {};
     if (!texto || !String(texto).trim()) return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
-    const commentId = Date.now(); // simulando id (sem tabela de comentários)
+    const commentId = Date.now(); // (simulação) id
     res.json({ ok: true, id: commentId, points: 3 });
   } catch (e) {
     console.error('❌ [MURAL] comment:', e.message);
@@ -462,7 +474,10 @@ app.post('/api/trocas-proteina/bulk', authenticate, async (req, res) => {
     let inseridas = 0;
     for (const t of trocas) {
       try {
-        await dbRun('INSERT OR REPLACE INTO trocas_proteina (usuario_id, data, proteina_original, proteina_nova) VALUES (?, ?, ?, ?)', [req.user.id, t.data, t.proteina_original, t.proteina_nova]);
+        await dbRun(
+          'INSERT OR REPLACE INTO trocas_proteina (usuario_id, data, proteina_original, proteina_nova) VALUES (?, ?, ?, ?)',
+          [req.user.id, t.data, t.proteina_original, t.proteina_nova]
+        );
         inseridas++;
       } catch (e) {
         console.error('❌ [TROCAS] item:', e.message);
@@ -647,7 +662,7 @@ app.use('/api', (req, res) => {
   res.status(404).json({ ok: false, error: 'Rota não encontrada', path: req.path });
 });
 
-// ==================== ARQUIVOS ESTÁTICOS / SPA (apenas em produção) ====================
+// ==================== ARQUIVOS ESTÁTICOS / SPA (produção) ====================
 if (!isDev && fs.existsSync(path.join(__dirname, 'dist'))) {
   app.use(express.static(path.join(__dirname, 'dist')));
   console.log('📁 [STATIC] Servindo dist/');
