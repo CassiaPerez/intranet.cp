@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { apiGet } from '../lib/api';
+
+const API_BASE = '';
 
 interface User {
   id: string;
@@ -14,7 +15,7 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  logout: () => Promise<void>;
+  logout: () => void;
   isAuthenticated: boolean;
   loading: boolean;
 }
@@ -22,72 +23,172 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
 };
 
-export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { void checkAuth(); }, []);
-
-  const normalizeUser = (u: any): User => {
-    const sector = u.sector ?? u.setor ?? 'Geral';
-    const setor = u.setor ?? sector;
-    let role = u.role;
-    if (!role) {
-      if (u.email === 'admin@grupocropfield.com.br' || sector === 'TI' || setor === 'TI') role = 'admin';
-      else if (sector === 'RH' || setor === 'RH') role = 'rh';
-      else role = 'colaborador';
-    }
-    return { id: String(u.id), name: u.name ?? u.nome, email: u.email, sector, setor, role, avatar: u.avatar ?? u.foto, token: u.token };
-  };
+  useEffect(() => {
+    checkAuth();
+  }, []);
 
   const checkAuth = async () => {
     setLoading(true);
     try {
-      // 1) back é a verdade
-      const data = await apiGet<{ok: boolean; user: any}>('/api/me');
-      if (data?.ok && data.user) {
-        const nu = normalizeUser(data.user);
-        setUser(nu);
-        setIsAuthenticated(true);
-        localStorage.setItem('currentUser', JSON.stringify(nu));
-        setLoading(false);
-        return;
-      }
-    } catch {
-      // 2) fallback localStorage
-      const stored = localStorage.getItem('currentUser');
-      if (stored) {
+      console.log('[AUTH] Starting auth check...');
+      
+      // Check if user is stored in localStorage first
+      const storedUser = localStorage.getItem('currentUser');
+      if (storedUser) {
         try {
-          const nu = normalizeUser(JSON.parse(stored));
-          setUser(nu);
-          setIsAuthenticated(true);
-          setLoading(false);
-          return;
-        } catch { localStorage.removeItem('currentUser'); }
+          const userData = JSON.parse(storedUser);
+          console.log('[AUTH] Found stored user:', userData.email);
+          
+          // Normalize user data structure for compatibility
+          if (userData && userData.email) {
+            // Ensure both sector and setor exist
+            if (userData.sector && !userData.setor) {
+              userData.setor = userData.sector;
+            }
+            if (userData.setor && !userData.sector) {
+              userData.sector = userData.setor;
+            }
+            // Ensure role exists
+            if (!userData.role) {
+              if (userData.email === 'admin@grupocropfield.com.br' || userData.sector === 'TI' || userData.setor === 'TI') {
+                userData.role = 'admin';
+              } else if (userData.sector === 'RH' || userData.setor === 'RH') {
+                userData.role = 'rh';
+              } else {
+                userData.role = 'colaborador';
+              }
+            }
+            console.log('User data normalized:', userData);
+            setUser(userData);
+            setIsAuthenticated(true);
+            setLoading(false);
+            
+            // Verify with backend that session is still valid
+            try {
+              const verifyResponse = await fetch('/api/me', {
+                credentials: 'include'
+              });
+              
+              if (!verifyResponse.ok) {
+                console.log('[AUTH] Session expired, clearing stored user');
+                localStorage.removeItem('currentUser');
+                setUser(null);
+                setIsAuthenticated(false);
+              }
+            } catch (verifyError) {
+              console.log('[AUTH] Cannot verify session with backend, but keeping local auth');
+            }
+            
+            return;
+          }
+        } catch (error) {
+          console.error('Error parsing stored user:', error);
+          localStorage.removeItem('currentUser');
+        }
       }
+
+      // Try API call as fallback
+      try {
+        const response = await fetch('/api/me', {
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          const responseText = await response.text();
+          if (responseText) {
+            try {
+              const data = JSON.parse(responseText);
+              // Normalize API user data
+              if (data.user) {
+                if (data.user.sector && !data.user.setor) {
+                  data.user.setor = data.user.sector;
+                }
+                if (data.user.setor && !data.user.sector) {
+                  data.user.sector = data.user.setor;
+                }
+                if (!data.user.role) {
+                  if (data.user.email === 'admin@grupocropfield.com.br' || data.user.sector === 'TI' || data.user.setor === 'TI') {
+                    data.user.role = 'admin';
+                  } else if (data.user.sector === 'RH' || data.user.setor === 'RH') {
+                    data.user.role = 'rh';
+                  } else {
+                    data.user.role = 'colaborador';
+                  }
+                }
+                // Preserve token if returned by API
+                if (data.token) {
+                  data.user.token = data.token;
+                }
+                console.log('API user data normalized:', data.user);
+                setUser(data.user);
+                setIsAuthenticated(true);
+                localStorage.setItem('currentUser', JSON.stringify(data.user));
+                setLoading(false);
+                return;
+              }
+            } catch (parseError) {
+              console.error('Failed to parse auth response:', parseError);
+            }
+          }
+        }
+      } catch (apiError) {
+        console.log('API not available, using local auth');
+      }
+
+      // If no stored user and API fails, user is not authenticated
+      setUser(null);
+      setIsAuthenticated(false);
+    } catch (error) {
+      console.error('Auth check error:', error);
+      setUser(null);
+      setIsAuthenticated(false);
+    } finally {
+      setLoading(false);
     }
-    setUser(null);
-    setIsAuthenticated(false);
-    setLoading(false);
   };
 
   const logout = async () => {
     try {
-      await fetch('/auth/logout', { method: 'POST', credentials: 'include' });
-    } catch {}
-    localStorage.removeItem('currentUser');
-    setUser(null);
-    setIsAuthenticated(false);
+      // Clear localStorage first
+      localStorage.removeItem('currentUser');
+      
+      await fetch('/auth/logout', {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      setUser(null);
+      setIsAuthenticated(false);
+    }
   };
 
   return (
-    <AuthContext.Provider value={{ user, logout, isAuthenticated, loading }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        logout,
+        isAuthenticated,
+        loading,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
