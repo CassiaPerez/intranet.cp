@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// server.cjs - Servidor Express robusto para Intranet Cropfield (compatível com Express 5)
+// server.cjs - Servidor Express robusto para Intranet Cropfield (Express 5 compat)
 
 const express = require('express');
 const cors = require('cors');
@@ -11,50 +11,74 @@ const sqlite3 = require('sqlite3').verbose();
 
 // ==================== CONFIG ====================
 const app = express();
-const PORT = process.env.PORT || 3005; // use 3005 se o proxy do Vite aponta pra essa porta
+const PORT = process.env.PORT || 3005;
 const isDev = process.env.NODE_ENV !== 'production';
+
+// Se o frontend NÃO estiver em localhost (ex.: StackBlitz/Netlify), rode com CROSS_SITE=1
+const CROSS_SITE = process.env.CROSS_SITE === '1';
 
 console.log('🚀 [INIT] Iniciando servidor Intranet Cropfield...');
 console.log('🌍 [ENV] Ambiente:', isDev ? 'DESENVOLVIMENTO' : 'PRODUÇÃO');
+console.log('🔐 [COOKIES] CROSS_SITE =', CROSS_SITE ? 'ON (SameSite=None; Secure)' : 'OFF (SameSite=Lax)');
 
-// Diretório de dados
+// Diretório de dados e BD
 const dataDir = path.join(__dirname, 'data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-  console.log('📁 [INIT] Diretório data/ criado');
-}
-
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
 const dbPath = path.join(dataDir, 'database.sqlite');
 let db;
 
 // ==================== MIDDLEWARES ====================
-app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3005',
-    'http://127.0.0.1:3005'
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie']
-}));
+// CORS
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3005',
+  'http://127.0.0.1:3005',
+];
+const originRegexes = [
+  /^https?:\/\/[^/]*\.stackblitz\.io$/i,
+  /^https?:\/\/[^/]*webcontainer-api\.io$/i,
+  /^https?:\/\/[^/]*\.netlify\.app$/i,
+];
 
+app.use(cors({
+  credentials: true,
+  methods: ['GET','POST','PUT','PATCH','DELETE','OPTIONS'],
+  allowedHeaders: ['Content-Type','Authorization','Cookie'],
+  origin(origin, cb) {
+    if (!origin) return cb(null, true); // curl/Postman
+    if (allowedOrigins.includes(origin) || originRegexes.some(rx => rx.test(origin))) {
+      return cb(null, true);
+    }
+    console.warn('[CORS] Origin bloqueado:', origin);
+    return cb(null, false);
+  }
+}));
+app.options('*', cors());
+
+// Necessário para cookies secure atrás de proxy HTTPS
+app.set('trust proxy', 1);
+
+// Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Sessão (cookie de dev tolerante)
-app.use(session({
+// Sessão via cookie
+const sessionOptions = {
+  name: 'cf.sid',
   secret: 'cropfield-intranet-secret-2025',
   resave: false,
   saveUninitialized: false,
+  proxy: true,
   cookie: {
-    secure: false,      // em dev/HTTP
     httpOnly: true,
-    sameSite: 'lax',    // garante envio do cookie via navegação
-    maxAge: 24 * 60 * 60 * 1000
+    maxAge: 24 * 60 * 60 * 1000,
+    sameSite: CROSS_SITE ? 'none' : 'lax',
+    secure: CROSS_SITE ? true : false,
   }
-}));
+};
+app.use(session(sessionOptions));
+console.log('🧁 [SESSION] sameSite=%s secure=%s', sessionOptions.cookie.sameSite, sessionOptions.cookie.secure);
 
 // Log simples
 app.use((req, _res, next) => {
@@ -70,24 +94,22 @@ app.get('/api/health', (_req, res) => {
 // ==================== DB HELPERS ====================
 const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
   db.run(sql, params, function (err) {
-    if (err) return reject(err);
+    if (err) { console.error('❌ [DB] run:', err.message); return reject(err); }
     resolve({ lastID: this.lastID, changes: this.changes });
   });
 });
-
 const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
   db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
 });
-
 const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
   db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || []));
 });
 
 const createTables = async () => {
-  const tables = [
-    {
-      name: 'usuarios',
-      sql: `CREATE TABLE IF NOT EXISTS usuarios (
+  console.log('🔨 [DB] Criando/verificando tabelas...');
+  const defs = [
+    [`usuarios`, `
+      CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nome TEXT NOT NULL,
         email TEXT UNIQUE NOT NULL,
@@ -99,11 +121,9 @@ const createTables = async () => {
         pontos INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`
-    },
-    {
-      name: 'reservas',
-      sql: `CREATE TABLE IF NOT EXISTS reservas (
+      )`],
+    [`reservas`, `
+      CREATE TABLE IF NOT EXISTS reservas (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
         sala TEXT NOT NULL,
@@ -115,11 +135,9 @@ const createTables = async () => {
         status TEXT DEFAULT 'ativa',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-      )`
-    },
-    {
-      name: 'mural_posts',
-      sql: `CREATE TABLE IF NOT EXISTS mural_posts (
+      )`],
+    [`mural_posts`, `
+      CREATE TABLE IF NOT EXISTS mural_posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
         titulo TEXT NOT NULL,
@@ -128,11 +146,9 @@ const createTables = async () => {
         ativo BOOLEAN DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-      )`
-    },
-    {
-      name: 'mural_likes',
-      sql: `CREATE TABLE IF NOT EXISTS mural_likes (
+      )`],
+    [`mural_likes`, `
+      CREATE TABLE IF NOT EXISTS mural_likes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         post_id INTEGER NOT NULL,
         usuario_id INTEGER NOT NULL,
@@ -140,11 +156,9 @@ const createTables = async () => {
         UNIQUE(post_id, usuario_id),
         FOREIGN KEY (post_id) REFERENCES mural_posts (id),
         FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-      )`
-    },
-    {
-      name: 'trocas_proteina',
-      sql: `CREATE TABLE IF NOT EXISTS trocas_proteina (
+      )`],
+    [`trocas_proteina`, `
+      CREATE TABLE IF NOT EXISTS trocas_proteina (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
         data DATE NOT NULL,
@@ -152,11 +166,9 @@ const createTables = async () => {
         proteina_nova TEXT NOT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-      )`
-    },
-    {
-      name: 'portaria_agendamentos',
-      sql: `CREATE TABLE IF NOT EXISTS portaria_agendamentos (
+      )`],
+    [`portaria_agendamentos`, `
+      CREATE TABLE IF NOT EXISTS portaria_agendamentos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
         data DATE NOT NULL,
@@ -167,11 +179,9 @@ const createTables = async () => {
         status TEXT DEFAULT 'agendado',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-      )`
-    },
-    {
-      name: 'ti_solicitacoes',
-      sql: `CREATE TABLE IF NOT EXISTS ti_solicitacoes (
+      )`],
+    [`ti_solicitacoes`, `
+      CREATE TABLE IF NOT EXISTS ti_solicitacoes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         usuario_id INTEGER NOT NULL,
         titulo TEXT NOT NULL,
@@ -180,15 +190,9 @@ const createTables = async () => {
         status TEXT DEFAULT 'pending',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (usuario_id) REFERENCES usuarios (id)
-      )`
-    }
+      )`],
   ];
-
-  console.log('🔨 [DB] Criando/verificando tabelas...');
-  for (const t of tables) {
-    await dbRun(t.sql);
-    console.log(`✅ [DB] ${t.name}`);
-  }
+  for (const [name, sql] of defs) { await dbRun(sql); console.log(`✅ [DB] ${name}`); }
 };
 
 const createDefaultUsers = async () => {
@@ -196,10 +200,7 @@ const createDefaultUsers = async () => {
     const exists = await dbGet('SELECT id FROM usuarios WHERE email = ?', [email]);
     if (!exists) {
       const hash = await bcrypt.hash(senha, 10);
-      await dbRun(
-        'INSERT INTO usuarios (nome, email, senha, setor, role) VALUES (?, ?, ?, ?, ?)',
-        [nome, email, hash, setor, role]
-      );
+      await dbRun('INSERT INTO usuarios (nome, email, senha, setor, role) VALUES (?, ?, ?, ?, ?)', [nome, email, hash, setor, role]);
       console.log(`👤 [DB] Seed criado: ${email}`);
     }
   };
@@ -217,9 +218,7 @@ const initDatabase = async () => new Promise((resolve, reject) => {
       await createDefaultUsers();
       console.log('✅ [DB] Pronto');
       resolve();
-    } catch (e) {
-      reject(e);
-    }
+    } catch (e) { reject(e); }
   });
 });
 
@@ -254,16 +253,12 @@ app.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ ok: false, error: 'Email e senha são obrigatórios' });
-
-    const user = await dbGet('SELECT * FROM usuarios WHERE email = ? AND ativo = 1', [email]);
+    const user = await dbGet('SELECT * FROM usuarios WHERE email = ? AND ativo = 1', [email.toLowerCase()]);
     if (!user) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
-
     const ok = await bcrypt.compare(password, user.senha);
     if (!ok) return res.status(401).json({ ok: false, error: 'Credenciais inválidas' });
-
     req.session.userId = user.id;
     req.session.userEmail = user.email;
-
     const payload = { id: user.id, name: user.nome, email: user.email, sector: user.setor, setor: user.setor, role: user.role, avatar: user.foto };
     res.json({ ok: true, user: payload });
   } catch (e) {
@@ -276,8 +271,16 @@ app.post('/auth/logout', (req, res) => {
   req.session.destroy(() => res.json({ ok: true, message: 'Logout realizado' }));
 });
 
-app.get('/api/me', authenticate, (req, res) => {
-  res.json({ ok: true, user: req.user });
+app.get('/api/me', authenticate, (req, res) => { res.json({ ok: true, user: req.user }); });
+
+// DEBUG
+app.get('/api/debug/whoami', (req, res) => {
+  res.json({
+    ok: true,
+    hasSession: !!req.session?.userId,
+    session: { id: req.sessionID, userId: req.session?.userId },
+    headers: { origin: req.headers.origin, cookieHeader: !!req.headers.cookie }
+  });
 });
 
 // ==================== USUÁRIOS (ADMIN) ====================
@@ -293,10 +296,8 @@ app.get('/api/admin/users', authenticate, async (_req, res) => {
 
 app.post('/api/admin/users', authenticate, async (req, res) => {
   try {
-    let { nome, name, email, senha, password, setor = 'Geral', role = 'colaborador' } = req.body || {};
-
-    // normalização campos
-    nome = (nome || name || '').trim();
+    let { nome, email, senha, password, setor = 'Geral', role = 'colaborador' } = req.body || {};
+    nome = (nome || '').trim();
     email = (email || '').trim().toLowerCase();
     const senhaRaw = (senha ?? password ?? '').toString();
 
@@ -311,10 +312,7 @@ app.post('/api/admin/users', authenticate, async (req, res) => {
     if (dup) return res.status(409).json({ ok: false, error: 'Este email já está em uso' });
 
     const hash = await bcrypt.hash(senhaRaw, 10);
-    const result = await dbRun(
-      'INSERT INTO usuarios (nome, email, senha, setor, role, ativo) VALUES (?, ?, ?, ?, ?, ?)',
-      [nome, email, hash, setor, role, 1]
-    );
+    const result = await dbRun('INSERT INTO usuarios (nome, email, senha, setor, role, ativo) VALUES (?, ?, ?, ?, ?, ?)', [nome, email, hash, setor, role, 1]);
     res.json({ ok: true, id: result.lastID, message: 'Usuário criado com sucesso' });
   } catch (e) {
     console.error('❌ [ADMIN] create:', e.message);
@@ -344,10 +342,9 @@ app.patch('/api/admin/users/:userId', authenticate, async (req, res) => {
 app.patch('/api/admin/users/:userId/password', authenticate, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { senha, password } = req.body || {};
-    const nova = (senha ?? password ?? '').toString();
-    if (!nova || nova.length < 6) return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
-    const hash = await bcrypt.hash(nova, 10);
+    const { senha } = req.body || {};
+    if (!senha || String(senha).length < 6) return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
+    const hash = await bcrypt.hash(String(senha), 10);
     const r = await dbRun('UPDATE usuarios SET senha = ?, updated_at = ? WHERE id = ?', [hash, new Date().toISOString(), userId]);
     if (r.changes === 0) return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
     res.json({ ok: true, message: 'Senha alterada com sucesso' });
@@ -443,7 +440,7 @@ app.post('/api/mural/:postId/comments', authenticate, async (req, res) => {
   try {
     const { texto } = req.body || {};
     if (!texto || !String(texto).trim()) return res.status(400).json({ ok: false, error: 'Texto do comentário é obrigatório' });
-    const commentId = Date.now(); // (simulação) id
+    const commentId = Date.now(); // (sem persistência de comentários)
     res.json({ ok: true, id: commentId, points: 3 });
   } catch (e) {
     console.error('❌ [MURAL] comment:', e.message);
@@ -474,14 +471,9 @@ app.post('/api/trocas-proteina/bulk', authenticate, async (req, res) => {
     let inseridas = 0;
     for (const t of trocas) {
       try {
-        await dbRun(
-          'INSERT OR REPLACE INTO trocas_proteina (usuario_id, data, proteina_original, proteina_nova) VALUES (?, ?, ?, ?)',
-          [req.user.id, t.data, t.proteina_original, t.proteina_nova]
-        );
+        await dbRun('INSERT OR REPLACE INTO trocas_proteina (usuario_id, data, proteina_original, proteina_nova) VALUES (?, ?, ?, ?)', [req.user.id, t.data, t.proteina_original, t.proteina_nova]);
         inseridas++;
-      } catch (e) {
-        console.error('❌ [TROCAS] item:', e.message);
-      }
+      } catch (e) { console.error('❌ [TROCAS] item:', e.message); }
     }
     res.json({ ok: true, inseridas, totalPoints: inseridas * 5 });
   } catch (e) {
@@ -557,7 +549,7 @@ app.post('/api/portaria/agendamentos', authenticate, async (req, res) => {
   }
 });
 
-// ==================== DASHBOARD ====================
+// ==================== DASHBOARD / EXPORTS ====================
 app.get('/api/admin/dashboard', authenticate, async (req, res) => {
   try {
     const stats = {
@@ -576,7 +568,6 @@ app.get('/api/admin/dashboard', authenticate, async (req, res) => {
   }
 });
 
-// ==================== EXPORTS CSV ====================
 app.get('/api/admin/export/:filename', authenticate, async (req, res) => {
   try {
     const { filename } = req.params;
@@ -656,17 +647,17 @@ app.get('/api/admin/export/:filename', authenticate, async (req, res) => {
   }
 });
 
-// ==================== 404 PARA APIS (Express 5: sem '*') ====================
+// ==================== 404 APIs (Express 5: sem curingas inválidos) ====================
 app.use('/api', (req, res) => {
   console.log('❌ [404] Rota API não encontrada:', req.path);
   res.status(404).json({ ok: false, error: 'Rota não encontrada', path: req.path });
 });
 
-// ==================== ARQUIVOS ESTÁTICOS / SPA (produção) ====================
+// ==================== STATIC / SPA (somente produção) ====================
 if (!isDev && fs.existsSync(path.join(__dirname, 'dist'))) {
   app.use(express.static(path.join(__dirname, 'dist')));
   console.log('📁 [STATIC] Servindo dist/');
-  // Fallback SPA com Regex que EXCLUI /api (compatível com Express 5)
+  // Fallback que EXCLUI /api
   app.get(/^(?!\/api).*/, (_req, res) => {
     res.sendFile(path.join(__dirname, 'dist', 'index.html'));
   });
@@ -718,23 +709,10 @@ const startServer = async () => {
   }
 };
 
-process.on('uncaughtException', (e) => {
-  console.error('💥 [UNCAUGHT]', e?.message || e);
-});
-process.on('unhandledRejection', (r) => {
-  console.error('💥 [REJECTION]', r);
-});
-process.on('SIGTERM', () => {
-  console.log('📡 SIGTERM');
-  if (db) db.close(() => process.exit(0)); else process.exit(0);
-});
-process.on('SIGINT', () => {
-  console.log('📡 SIGINT');
-  if (db) db.close(() => process.exit(0)); else process.exit(0);
-});
+process.on('uncaughtException', (e) => console.error('💥 [UNCAUGHT]', e?.message || e));
+process.on('unhandledRejection', (r) => console.error('💥 [REJECTION]', r));
+process.on('SIGTERM', () => { console.log('📡 SIGTERM'); if (db) db.close(() => process.exit(0)); else process.exit(0); });
+process.on('SIGINT', () => { console.log('📡 SIGINT'); if (db) db.close(() => process.exit(0)); else process.exit(0); });
 
-if (require.main === module) {
-  startServer();
-}
-
+if (require.main === module) startServer();
 module.exports = app;
