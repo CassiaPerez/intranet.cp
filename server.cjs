@@ -9,7 +9,7 @@ const fs = require('fs');
 const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
 
-// ==================== CONFIGURAÇÃO ====================
+// ==================== CONFIG ====================
 const app = express();
 const PORT = process.env.PORT || 3005; // mantenha 3005 se seu Vite proxy aponta pra essa porta
 const isDev = process.env.NODE_ENV !== 'production';
@@ -23,7 +23,6 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
   console.log('📁 [INIT] Diretório data/ criado');
 }
-
 const dbPath = path.join(dataDir, 'database.sqlite');
 let db;
 
@@ -73,11 +72,9 @@ const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
     resolve({ lastID: this.lastID, changes: this.changes });
   });
 });
-
 const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
   db.get(sql, params, (err, row) => err ? reject(err) : resolve(row));
 });
-
 const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
   db.all(sql, params, (err, rows) => err ? reject(err) : resolve(rows || []));
 });
@@ -285,8 +282,9 @@ app.get('/api/admin/users', authenticate, async (_req, res) => {
 
 app.post('/api/admin/users', authenticate, async (req, res) => {
   try {
-    let { nome, email, senha, password, setor = 'Geral', role = 'colaborador' } = req.body || {};
-    nome = (nome || '').trim();
+    // aceita nome OU name, e senha OU password
+    let { nome, name, email, senha, password, setor = 'Geral', role = 'colaborador' } = req.body || {};
+    nome = (nome || name || '').trim();
     email = (email || '').trim().toLowerCase();
     const senhaRaw = (senha ?? password ?? '').toString();
 
@@ -301,7 +299,10 @@ app.post('/api/admin/users', authenticate, async (req, res) => {
     if (dup) return res.status(409).json({ ok: false, error: 'Este email já está em uso' });
 
     const hash = await bcrypt.hash(senhaRaw, 10);
-    const result = await dbRun('INSERT INTO usuarios (nome, email, senha, setor, role, ativo) VALUES (?, ?, ?, ?, ?, ?)', [nome, email, hash, setor, role, 1]);
+    const result = await dbRun(
+      'INSERT INTO usuarios (nome, email, senha, setor, role, ativo) VALUES (?, ?, ?, ?, ?, ?)',
+      [nome, email, hash, setor, role, 1]
+    );
     res.json({ ok: true, id: result.lastID, message: 'Usuário criado com sucesso' });
   } catch (e) {
     console.error('❌ [ADMIN] create:', e.message);
@@ -331,9 +332,10 @@ app.patch('/api/admin/users/:userId', authenticate, async (req, res) => {
 app.patch('/api/admin/users/:userId/password', authenticate, async (req, res) => {
   try {
     const { userId } = req.params;
-    const { senha } = req.body || {};
-    if (!senha || String(senha).length < 6) return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
-    const hash = await bcrypt.hash(String(senha), 10);
+    const { senha, password } = req.body || {};
+    const nova = (senha ?? password ?? '').toString();
+    if (!nova || nova.length < 6) return res.status(400).json({ ok: false, error: 'Senha deve ter pelo menos 6 caracteres' });
+    const hash = await bcrypt.hash(nova, 10);
     const r = await dbRun('UPDATE usuarios SET senha = ?, updated_at = ? WHERE id = ?', [hash, new Date().toISOString(), userId]);
     if (r.changes === 0) return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
     res.json({ ok: true, message: 'Senha alterada com sucesso' });
